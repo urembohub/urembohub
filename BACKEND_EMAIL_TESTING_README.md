@@ -86,7 +86,7 @@ npm run test:emails:admin
 
 ## 📧 What You'll Receive
 
-After running the tests, check `pablocasso20@gmail.com` for:
+After running the tests, check `benardogutu65@gmail.com` for:
 
 - **Authentication:** 5 emails (welcome, verification, password reset, etc.)
 - **Onboarding:** 5 emails (account created, profile approved/rejected, KYC updates, etc.)
@@ -167,7 +167,7 @@ LOG_LEVEL=debug
 
 ```
 🚀 Starting Backend Email Testing Suite
-📧 Test emails will be sent to: pablocasso20@gmail.com
+📧 Test emails will be sent to: benardogutu65@gmail.com
 ============================================================
 
 🔐 Testing Authentication Emails...
@@ -179,7 +179,7 @@ LOG_LEVEL=debug
 
 🎉 All email tests completed successfully!
 ⏱️  Total time: 15.23 seconds
-📧 Check your inbox at pablocasso20@gmail.com for all test emails
+📧 Check your inbox at benardogutu65@gmail.com for all test emails
 ============================================================
 ```
 

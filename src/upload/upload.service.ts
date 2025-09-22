@@ -24,10 +24,17 @@ export class UploadService {
       throw new BadRequestException('No file provided');
     }
 
-    // Validate file type
-    const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    // Validate file type - support both images and documents for onboarding
+    const allowedMimeTypes = [
+      // Images
+      'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+      // Documents
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ];
     if (!allowedMimeTypes.includes(file.mimetype)) {
-      throw new BadRequestException('Invalid file type. Only JPEG, PNG, GIF, and WebP images are allowed.');
+      throw new BadRequestException('Invalid file type. Only JPEG, PNG, GIF, WebP images and PDF, DOC, DOCX documents are allowed.');
     }
 
     // Validate file size (5MB limit)

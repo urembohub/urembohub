@@ -41,7 +41,7 @@ export const getWelcomeTemplate = (userName: string) => {
         company_name: 'Urembo Hub',
         support_email: 'support@urembohub.com',
         base_url: 'https://urembohub.com',
-        logo_url: 'https://via.placeholder.com/200x60/252849/ffffff?text=Urembo+Hub'
+        logo_url: `${process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000'}/uploads/assets/logo.png`
       }
     })
   };
@@ -83,7 +83,7 @@ export const getVerificationTemplate = (userName: string, verificationUrl: strin
         company_name: 'Urembo Hub',
         support_email: 'support@urembohub.com',
         base_url: 'https://urembohub.com',
-        logo_url: 'https://via.placeholder.com/200x60/252849/ffffff?text=Urembo+Hub'
+        logo_url: `${process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000'}/uploads/assets/logo.png`
       }
     })
   };
@@ -126,7 +126,7 @@ export const getPasswordResetTemplate = (userName: string, resetUrl: string) => 
         company_name: 'Urembo Hub',
         support_email: 'support@urembohub.com',
         base_url: 'https://urembohub.com',
-        logo_url: 'https://via.placeholder.com/200x60/252849/ffffff?text=Urembo+Hub'
+        logo_url: `${process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000'}/uploads/assets/logo.png`
       }
     })
   };
@@ -165,7 +165,7 @@ export const getPasswordChangedTemplate = (userName: string) => {
         company_name: 'Urembo Hub',
         support_email: 'support@urembohub.com',
         base_url: 'https://urembohub.com',
-        logo_url: 'https://via.placeholder.com/200x60/252849/ffffff?text=Urembo+Hub'
+        logo_url: `${process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000'}/uploads/assets/logo.png`
       }
     })
   };
@@ -215,7 +215,7 @@ export const getSuspiciousLoginTemplate = (userName: string, loginIp: string, lo
         company_name: 'Urembo Hub',
         support_email: 'support@urembohub.com',
         base_url: 'https://urembohub.com',
-        logo_url: 'https://via.placeholder.com/200x60/252849/ffffff?text=Urembo+Hub'
+        logo_url: `${process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000'}/uploads/assets/logo.png`
       }
     })
   };

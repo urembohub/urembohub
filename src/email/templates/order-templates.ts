@@ -50,7 +50,7 @@ export const getNewOrderTemplate = (vendorName: string, orderId: string, orderDa
         company_name: 'Urembo Hub',
         support_email: 'support@urembohub.com',
         base_url: 'https://urembohub.com',
-        logo_url: 'https://via.placeholder.com/200x60/252849/ffffff?text=Urembo+Hub'
+        logo_url: `${process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000'}/uploads/assets/logo.png`
       }
     })
   };
@@ -101,7 +101,7 @@ export const getOrderAcceptedTemplate = (customerName: string, orderId: string, 
         company_name: 'Urembo Hub',
         support_email: 'support@urembohub.com',
         base_url: 'https://urembohub.com',
-        logo_url: 'https://via.placeholder.com/200x60/252849/ffffff?text=Urembo+Hub'
+        logo_url: `${process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000'}/uploads/assets/logo.png`
       }
     })
   };
@@ -158,7 +158,7 @@ export const getOrderShippedTemplate = (customerName: string, orderId: string, t
         company_name: 'Urembo Hub',
         support_email: 'support@urembohub.com',
         base_url: 'https://urembohub.com',
-        logo_url: 'https://via.placeholder.com/200x60/252849/ffffff?text=Urembo+Hub'
+        logo_url: `${process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000'}/uploads/assets/logo.png`
       }
     })
   };
@@ -205,7 +205,7 @@ export const getOrderDeliveredTemplate = (customerName: string, orderId: string)
         company_name: 'Urembo Hub',
         support_email: 'support@urembohub.com',
         base_url: 'https://urembohub.com',
-        logo_url: 'https://via.placeholder.com/200x60/252849/ffffff?text=Urembo+Hub'
+        logo_url: `${process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000'}/uploads/assets/logo.png`
       }
     })
   };

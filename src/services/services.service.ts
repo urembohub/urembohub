@@ -30,7 +30,7 @@ export class ServicesService {
       vendorId: userId,
     };
 
-    return this.prisma.service.create({
+    const service = await this.prisma.service.create({
       data: serviceData,
       include: {
         vendor: {
@@ -43,6 +43,12 @@ export class ServicesService {
         },
       },
     });
+
+    // Convert Decimal price to number for proper frontend handling
+    return {
+      ...service,
+      price: Number(service.price)
+    };
   }
 
   async getAllServices(category?: string, isActive = true) {
@@ -66,7 +72,11 @@ export class ServicesService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return services;
+    // Convert Decimal price to number for proper frontend handling
+    return services.map(service => ({
+      ...service,
+      price: Number(service.price)
+    }));
   }
 
   async getServiceById(id: string) {
@@ -88,7 +98,11 @@ export class ServicesService {
       throw new NotFoundException('Service not found');
     }
 
-    return service;
+    // Convert Decimal price to number for proper frontend handling
+    return {
+      ...service,
+      price: Number(service.price)
+    };
   }
 
   async updateService(id: string, userId: string, userRole: user_role, updateServiceDto: UpdateServiceDto) {
@@ -116,7 +130,7 @@ export class ServicesService {
     if (updateServiceDto.metadata !== undefined) updateData.metadata = updateServiceDto.metadata;
     if (updateServiceDto.isActive !== undefined) updateData.isActive = updateServiceDto.isActive;
 
-    return this.prisma.service.update({
+    const updatedService = await this.prisma.service.update({
       where: { id },
       data: updateData,
       include: {
@@ -130,6 +144,12 @@ export class ServicesService {
         },
       },
     });
+
+    // Convert Decimal price to number for proper frontend handling
+    return {
+      ...updatedService,
+      price: Number(updatedService.price)
+    };
   }
 
   async deleteService(id: string, userId: string, userRole: user_role) {

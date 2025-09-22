@@ -31,6 +31,19 @@ import {
   getPaymentSuccessfulTemplate, 
   getPaymentFailedTemplate 
 } from './templates/payment-templates';
+import {
+  getVendorEscrowCreatedTemplate,
+  getCustomerEscrowCreatedTemplate,
+  getAdminEscrowCreatedTemplate,
+  getCustomerServiceStartedTemplate,
+  getCustomerServiceCompletedTemplate,
+  getAdminDisputeNotificationTemplate,
+  getVendorDisputeNotificationTemplate,
+  getVendorFundsReleasedTemplate,
+  getCustomerFundsReleasedTemplate,
+  getCustomerRefundTemplate,
+  getVendorRefundNotificationTemplate,
+} from './templates/escrow-templates';
 
 export interface EmailTemplate {
   subject: string;
@@ -169,6 +182,15 @@ export class EmailService {
 
   async sendKycUpdateEmail(userEmail: string, userName: string, status: string, reason?: string): Promise<{ success: boolean; messageId?: string; error?: string }> {
     const template = getKycUpdateTemplate(userName, status, reason);
+    return this.sendEmail({
+      to: userEmail,
+      subject: template.subject,
+      html: template.html,
+    });
+  }
+
+  async sendOnboardingRevisionRequestEmail(userEmail: string, userName: string, adminNotes: string, resubmissionUrl?: string): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const template = this.getOnboardingRevisionRequestTemplate(userName, adminNotes, resubmissionUrl);
     return this.sendEmail({
       to: userEmail,
       subject: template.subject,
@@ -315,6 +337,15 @@ export class EmailService {
     });
   }
 
+  async sendAdminOnboardingSubmissionEmail(adminEmail: string, submissionData: any): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const template = this.getAdminOnboardingSubmissionTemplate(submissionData);
+    return this.sendEmail({
+      to: adminEmail,
+      subject: template.subject,
+      html: template.html,
+    });
+  }
+
   async sendPasswordResetOTPEmail(userEmail: string, userName: string, otp: string): Promise<{ success: boolean; messageId?: string; error?: string }> {
     const template = this.getPasswordResetOTPTemplate(userName, otp);
     return this.sendEmail({
@@ -337,6 +368,44 @@ export class EmailService {
     const template = this.getPartnerApprovalTemplate(partnerName, approved, reason);
     return this.sendEmail({
       to: partnerEmail,
+      subject: template.subject,
+      html: template.html,
+    });
+  }
+
+  // Retailer Emails
+  async sendRetailerNewOrderEmail(retailerEmail: string, retailerName: string, orderId: string, orderData: any): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const template = this.getRetailerNewOrderTemplate(retailerName, orderId, orderData);
+    return this.sendEmail({
+      to: retailerEmail,
+      subject: template.subject,
+      html: template.html,
+    });
+  }
+
+  async sendRetailerPaymentEmail(retailerEmail: string, retailerName: string, paymentData: any): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const template = this.getRetailerPaymentTemplate(retailerName, paymentData);
+    return this.sendEmail({
+      to: retailerEmail,
+      subject: template.subject,
+      html: template.html,
+    });
+  }
+
+  // Manufacturer Emails
+  async sendManufacturerNewOrderEmail(manufacturerEmail: string, manufacturerName: string, orderId: string, orderData: any): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const template = this.getManufacturerNewOrderTemplate(manufacturerName, orderId, orderData);
+    return this.sendEmail({
+      to: manufacturerEmail,
+      subject: template.subject,
+      html: template.html,
+    });
+  }
+
+  async sendManufacturerPaymentEmail(manufacturerEmail: string, manufacturerName: string, paymentData: any): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const template = this.getManufacturerPaymentTemplate(manufacturerName, paymentData);
+    return this.sendEmail({
+      to: manufacturerEmail,
       subject: template.subject,
       html: template.html,
     });
@@ -887,5 +956,612 @@ export class EmailService {
         </div>
       `
     };
+  }
+
+  private getAdminOnboardingSubmissionTemplate(submissionData: any): EmailTemplate {
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
+    const verificationUrl = `${frontendUrl}/admin?tab=verification`;
+    
+    return {
+      subject: `New Onboarding Submission - ${submissionData.businessName || submissionData.fullName}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h1 style="color: #007bff; text-align: center;">New Onboarding Submission</h1>
+          <p>A new business account has submitted their onboarding requirements for review:</p>
+          
+          <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <h3 style="margin: 0 0 16px 0; color: #333;">Business Details</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Business Name:</td>
+                <td style="padding: 8px 0; color: #666;">${submissionData.businessName || 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Contact Person:</td>
+                <td style="padding: 8px 0; color: #666;">${submissionData.fullName || 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Email:</td>
+                <td style="padding: 8px 0; color: #666;">${submissionData.email || 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Role:</td>
+                <td style="padding: 8px 0; color: #666;">${submissionData.role || 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Submission Date:</td>
+                <td style="padding: 8px 0; color: #666;">${submissionData.submittedAt || new Date().toLocaleDateString()}</td>
+              </tr>
+            </table>
+          </div>
+
+          <div style="background: #e3f2fd; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <h3 style="margin: 0 0 12px 0; color: #1976d2;">Action Required</h3>
+            <p style="margin: 0;">Please review the submitted documents and business information to approve or request additional details.</p>
+          </div>
+
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${verificationUrl}" style="background: #007bff; color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600;">
+              Review Submission
+            </a>
+          </div>
+
+          <p style="color: #666; font-size: 14px; text-align: center;">
+            This submission requires your attention within 48 hours for optimal user experience.
+          </p>
+
+          <p>Best regards,<br>The Urembo Hub Team</p>
+        </div>
+      `
+    };
+  }
+
+  private getOnboardingRevisionRequestTemplate(userName: string, adminNotes: string, resubmissionUrl?: string): EmailTemplate {
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
+    const defaultResubmissionUrl = resubmissionUrl || `${frontendUrl}/onboarding`;
+    
+    return {
+      subject: 'Onboarding Review - Additional Information Required',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h1 style="color: #ffc107; text-align: center;">Additional Information Required</h1>
+          <p>Hi <strong>${userName}</strong>,</p>
+          
+          <p>Thank you for submitting your business onboarding information. Our team has reviewed your submission and requires some additional details to complete the verification process.</p>
+
+          <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <h3 style="margin: 0 0 12px 0; color: #856404;">Reviewer Notes</h3>
+            <p style="margin: 0; color: #856404; line-height: 1.6;">${adminNotes}</p>
+          </div>
+
+          <div style="background: #e8f5e8; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <h3 style="margin: 0 0 12px 0; color: #2e7d32;">Next Steps</h3>
+            <ol style="margin: 0; padding-left: 20px; color: #2e7d32;">
+              <li style="margin-bottom: 8px;">Review the feedback above</li>
+              <li style="margin-bottom: 8px;">Update your submission with the requested information</li>
+              <li style="margin-bottom: 8px;">Resubmit for review</li>
+            </ol>
+          </div>
+
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${defaultResubmissionUrl}" style="background: #ffc107; color: #333; padding: 16px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600;">
+              Update Submission
+            </a>
+          </div>
+
+          <p style="color: #666; font-size: 14px;">
+            <strong>Note:</strong> Please ensure all requested information is provided accurately. Incomplete submissions may result in further delays.
+          </p>
+
+          <p>If you have any questions about the requirements, please don't hesitate to contact our support team.</p>
+
+          <p>Best regards,<br>The Urembo Hub Team</p>
+        </div>
+      `
+    };
+  }
+
+  private getRetailerNewOrderTemplate(retailerName: string, orderId: string, orderData: any): EmailTemplate {
+    return {
+      subject: 'New Order Received - Retailer',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h1 style="color: #28a745; text-align: center;">New Order Received</h1>
+          <p>Hi <strong>${retailerName}</strong>,</p>
+          
+          <p>You have received a new order for your retail products. Please review the details below:</p>
+
+          <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <h3 style="margin: 0 0 16px 0; color: #333;">Order Details</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Order ID:</td>
+                <td style="padding: 8px 0; color: #666;">${orderId}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Order Number:</td>
+                <td style="padding: 8px 0; color: #666;">${orderData.order_number || 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Customer:</td>
+                <td style="padding: 8px 0; color: #666;">${orderData.customer_name || 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Total Amount:</td>
+                <td style="padding: 8px 0; color: #666; font-weight: 600;">$${orderData.total_amount || '0.00'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Order Date:</td>
+                <td style="padding: 8px 0; color: #666;">${orderData.order_date || new Date().toLocaleDateString()}</td>
+              </tr>
+            </table>
+          </div>
+
+          <div style="background: #e8f5e8; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <h3 style="margin: 0 0 12px 0; color: #2e7d32;">Next Steps</h3>
+            <ol style="margin: 0; padding-left: 20px; color: #2e7d32;">
+              <li style="margin-bottom: 8px;">Review the order details</li>
+              <li style="margin-bottom: 8px;">Prepare the products for shipment</li>
+              <li style="margin-bottom: 8px;">Update order status when ready</li>
+            </ol>
+          </div>
+
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="https://urembohub.com/retailer/orders" style="background: #28a745; color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600;">
+              View Order Details
+            </a>
+          </div>
+
+          <p>Best regards,<br>The Urembo Hub Team</p>
+        </div>
+      `
+    };
+  }
+
+  private getRetailerPaymentTemplate(retailerName: string, paymentData: any): EmailTemplate {
+    const isSuccessful = paymentData.status === 'successful' || paymentData.status === 'completed';
+    const color = isSuccessful ? '#28a745' : '#dc3545';
+    const title = isSuccessful ? 'Payment Received' : 'Payment Issue';
+    
+    return {
+      subject: `${title} - Retailer`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h1 style="color: ${color}; text-align: center;">${title}</h1>
+          <p>Hi <strong>${retailerName}</strong>,</p>
+          
+          ${isSuccessful ? `
+            <p>Great news! You have received a payment for your retail order.</p>
+          ` : `
+            <p>There was an issue with a payment for your retail order. Please review the details below.</p>
+          `}
+
+          <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <h3 style="margin: 0 0 16px 0; color: #333;">Payment Details</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Payment ID:</td>
+                <td style="padding: 8px 0; color: #666;">${paymentData.payment_id || 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Order ID:</td>
+                <td style="padding: 8px 0; color: #666;">${paymentData.order_id || 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Amount:</td>
+                <td style="padding: 8px 0; color: #666; font-weight: 600;">$${paymentData.amount || '0.00'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Status:</td>
+                <td style="padding: 8px 0; color: ${color}; font-weight: 600;">${paymentData.status || 'Unknown'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Date:</td>
+                <td style="padding: 8px 0; color: #666;">${paymentData.date || new Date().toLocaleDateString()}</td>
+              </tr>
+            </table>
+          </div>
+
+          ${!isSuccessful ? `
+            <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <h3 style="margin: 0 0 12px 0; color: #856404;">Issue Details</h3>
+              <p style="margin: 0; color: #856404;">${paymentData.error_message || 'Please contact support for assistance.'}</p>
+            </div>
+          ` : ''}
+
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="https://urembohub.com/retailer/payments" style="background: ${color}; color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600;">
+              View Payment Details
+            </a>
+          </div>
+
+          <p>Best regards,<br>The Urembo Hub Team</p>
+        </div>
+      `
+    };
+  }
+
+  private getManufacturerNewOrderTemplate(manufacturerName: string, orderId: string, orderData: any): EmailTemplate {
+    return {
+      subject: 'New Order Received - Manufacturer',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h1 style="color: #007bff; text-align: center;">New Order Received</h1>
+          <p>Hi <strong>${manufacturerName}</strong>,</p>
+          
+          <p>You have received a new order for your manufactured products. Please review the details below:</p>
+
+          <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <h3 style="margin: 0 0 16px 0; color: #333;">Order Details</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Order ID:</td>
+                <td style="padding: 8px 0; color: #666;">${orderId}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Order Number:</td>
+                <td style="padding: 8px 0; color: #666;">${orderData.order_number || 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Customer:</td>
+                <td style="padding: 8px 0; color: #666;">${orderData.customer_name || 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Total Amount:</td>
+                <td style="padding: 8px 0; color: #666; font-weight: 600;">$${orderData.total_amount || '0.00'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Order Date:</td>
+                <td style="padding: 8px 0; color: #666;">${orderData.order_date || new Date().toLocaleDateString()}</td>
+              </tr>
+            </table>
+          </div>
+
+          <div style="background: #e3f2fd; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <h3 style="margin: 0 0 12px 0; color: #1976d2;">Next Steps</h3>
+            <ol style="margin: 0; padding-left: 20px; color: #1976d2;">
+              <li style="margin-bottom: 8px;">Review the order details</li>
+              <li style="margin-bottom: 8px;">Check product availability</li>
+              <li style="margin-bottom: 8px;">Begin manufacturing process if needed</li>
+              <li style="margin-bottom: 8px;">Update order status when ready</li>
+            </ol>
+          </div>
+
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="https://urembohub.com/manufacturer/orders" style="background: #007bff; color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600;">
+              View Order Details
+            </a>
+          </div>
+
+          <p>Best regards,<br>The Urembo Hub Team</p>
+        </div>
+      `
+    };
+  }
+
+  private getManufacturerPaymentTemplate(manufacturerName: string, paymentData: any): EmailTemplate {
+    const isSuccessful = paymentData.status === 'successful' || paymentData.status === 'completed';
+    const color = isSuccessful ? '#28a745' : '#dc3545';
+    const title = isSuccessful ? 'Payment Received' : 'Payment Issue';
+    
+    return {
+      subject: `${title} - Manufacturer`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h1 style="color: ${color}; text-align: center;">${title}</h1>
+          <p>Hi <strong>${manufacturerName}</strong>,</p>
+          
+          ${isSuccessful ? `
+            <p>Great news! You have received a payment for your manufactured products order.</p>
+          ` : `
+            <p>There was an issue with a payment for your manufactured products order. Please review the details below.</p>
+          `}
+
+          <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <h3 style="margin: 0 0 16px 0; color: #333;">Payment Details</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Payment ID:</td>
+                <td style="padding: 8px 0; color: #666;">${paymentData.payment_id || 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Order ID:</td>
+                <td style="padding: 8px 0; color: #666;">${paymentData.order_id || 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Amount:</td>
+                <td style="padding: 8px 0; color: #666; font-weight: 600;">$${paymentData.amount || '0.00'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Status:</td>
+                <td style="padding: 8px 0; color: ${color}; font-weight: 600;">${paymentData.status || 'Unknown'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #333;">Date:</td>
+                <td style="padding: 8px 0; color: #666;">${paymentData.date || new Date().toLocaleDateString()}</td>
+              </tr>
+            </table>
+          </div>
+
+          ${!isSuccessful ? `
+            <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <h3 style="margin: 0 0 12px 0; color: #856404;">Issue Details</h3>
+              <p style="margin: 0; color: #856404;">${paymentData.error_message || 'Please contact support for assistance.'}</p>
+            </div>
+          ` : ''}
+
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="https://urembohub.com/manufacturer/payments" style="background: ${color}; color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600;">
+              View Payment Details
+            </a>
+          </div>
+
+          <p>Best regards,<br>The Urembo Hub Team</p>
+        </div>
+      `
+    };
+  }
+
+  // ==================== ESCROW EMAIL METHODS ====================
+
+  /**
+   * Send vendor escrow created email
+   */
+  async sendVendorEscrowCreatedEmail(data: {
+    vendorEmail: string;
+    vendorName: string;
+    serviceName: string;
+    amount: number;
+    currency: string;
+    autoReleaseDate: Date;
+  }) {
+    try {
+      const template = getVendorEscrowCreatedTemplate(data);
+      await this.sendEmail({
+        to: data.vendorEmail,
+        subject: `Payment Received - ${data.serviceName} Ready to Begin`,
+        html: template,
+      });
+      console.log(`✅ [EMAIL] Vendor escrow created email sent to: ${data.vendorEmail}`);
+    } catch (error) {
+      console.error(`❌ [EMAIL] Failed to send vendor escrow created email:`, error);
+    }
+  }
+
+  /**
+   * Send customer escrow created email
+   */
+  async sendCustomerEscrowCreatedEmail(data: {
+    customerEmail: string;
+    customerName: string;
+    serviceName: string;
+    amount: number;
+    currency: string;
+    autoReleaseDate: Date;
+  }) {
+    try {
+      const template = getCustomerEscrowCreatedTemplate(data);
+      await this.sendEmail({
+        to: data.customerEmail,
+        subject: `Payment Confirmed - ${data.serviceName} Booked`,
+        html: template,
+      });
+      console.log(`✅ [EMAIL] Customer escrow created email sent to: ${data.customerEmail}`);
+    } catch (error) {
+      console.error(`❌ [EMAIL] Failed to send customer escrow created email:`, error);
+    }
+  }
+
+  /**
+   * Send admin escrow created email
+   */
+  async sendAdminEscrowCreatedEmail(data: {
+    serviceName: string;
+    vendorName: string;
+    customerName: string;
+    amount: number;
+    currency: string;
+    autoReleaseDate: Date;
+  }) {
+    try {
+      const template = getAdminEscrowCreatedTemplate(data);
+      const adminEmail = this.configService.get('ADMIN_EMAIL') || 'admin@urembohub.com';
+      await this.sendEmail({
+        to: adminEmail,
+        subject: `New Service Escrow Created - ${data.serviceName}`,
+        html: template,
+      });
+      console.log(`✅ [EMAIL] Admin escrow created email sent to: ${adminEmail}`);
+    } catch (error) {
+      console.error(`❌ [EMAIL] Failed to send admin escrow created email:`, error);
+    }
+  }
+
+  /**
+   * Send customer service started email
+   */
+  async sendCustomerServiceStartedEmail(data: {
+    customerEmail: string;
+    customerName: string;
+    serviceName: string;
+    vendorName: string;
+  }) {
+    try {
+      const template = getCustomerServiceStartedTemplate(data);
+      await this.sendEmail({
+        to: data.customerEmail,
+        subject: `Service Started - ${data.serviceName}`,
+        html: template,
+      });
+      console.log(`✅ [EMAIL] Customer service started email sent to: ${data.customerEmail}`);
+    } catch (error) {
+      console.error(`❌ [EMAIL] Failed to send customer service started email:`, error);
+    }
+  }
+
+  /**
+   * Send customer service completed email
+   */
+  async sendCustomerServiceCompletedEmail(data: {
+    customerEmail: string;
+    customerName: string;
+    serviceName: string;
+    vendorName: string;
+    escrowId: string;
+  }) {
+    try {
+      const template = getCustomerServiceCompletedTemplate(data);
+      await this.sendEmail({
+        to: data.customerEmail,
+        subject: `Service Completed - Action Required - ${data.serviceName}`,
+        html: template,
+      });
+      console.log(`✅ [EMAIL] Customer service completed email sent to: ${data.customerEmail}`);
+    } catch (error) {
+      console.error(`❌ [EMAIL] Failed to send customer service completed email:`, error);
+    }
+  }
+
+  /**
+   * Send admin dispute notification email
+   */
+  async sendAdminDisputeNotificationEmail(data: {
+    serviceName: string;
+    vendorName: string;
+    customerName: string;
+    disputeReason: string;
+    escrowId: string;
+    amount: number;
+    currency: string;
+  }) {
+    try {
+      const template = getAdminDisputeNotificationTemplate(data);
+      const adminEmail = this.configService.get('ADMIN_EMAIL') || 'admin@urembohub.com';
+      await this.sendEmail({
+        to: adminEmail,
+        subject: `URGENT: Service Dispute - ${data.serviceName}`,
+        html: template,
+      });
+      console.log(`✅ [EMAIL] Admin dispute notification email sent to: ${adminEmail}`);
+    } catch (error) {
+      console.error(`❌ [EMAIL] Failed to send admin dispute notification email:`, error);
+    }
+  }
+
+  /**
+   * Send vendor dispute notification email
+   */
+  async sendVendorDisputeNotificationEmail(data: {
+    vendorEmail: string;
+    vendorName: string;
+    serviceName: string;
+    disputeReason: string;
+    escrowId: string;
+  }) {
+    try {
+      const template = getVendorDisputeNotificationTemplate(data);
+      await this.sendEmail({
+        to: data.vendorEmail,
+        subject: `Service Disputed - ${data.serviceName}`,
+        html: template,
+      });
+      console.log(`✅ [EMAIL] Vendor dispute notification email sent to: ${data.vendorEmail}`);
+    } catch (error) {
+      console.error(`❌ [EMAIL] Failed to send vendor dispute notification email:`, error);
+    }
+  }
+
+  /**
+   * Send vendor funds released email
+   */
+  async sendVendorFundsReleasedEmail(data: {
+    vendorEmail: string;
+    vendorName: string;
+    serviceName: string;
+    amount: number;
+    currency: string;
+  }) {
+    try {
+      const template = getVendorFundsReleasedTemplate(data);
+      await this.sendEmail({
+        to: data.vendorEmail,
+        subject: `Payment Released - ${data.serviceName}`,
+        html: template,
+      });
+      console.log(`✅ [EMAIL] Vendor funds released email sent to: ${data.vendorEmail}`);
+    } catch (error) {
+      console.error(`❌ [EMAIL] Failed to send vendor funds released email:`, error);
+    }
+  }
+
+  /**
+   * Send customer funds released email
+   */
+  async sendCustomerFundsReleasedEmail(data: {
+    customerEmail: string;
+    customerName: string;
+    serviceName: string;
+    amount: number;
+    currency: string;
+  }) {
+    try {
+      const template = getCustomerFundsReleasedTemplate(data);
+      await this.sendEmail({
+        to: data.customerEmail,
+        subject: `Service Completed - ${data.serviceName}`,
+        html: template,
+      });
+      console.log(`✅ [EMAIL] Customer funds released email sent to: ${data.customerEmail}`);
+    } catch (error) {
+      console.error(`❌ [EMAIL] Failed to send customer funds released email:`, error);
+    }
+  }
+
+  /**
+   * Send customer refund email
+   */
+  async sendCustomerRefundEmail(data: {
+    customerEmail: string;
+    customerName: string;
+    serviceName: string;
+    amount: number;
+    currency: string;
+    reason: string;
+  }) {
+    try {
+      const template = getCustomerRefundTemplate(data);
+      await this.sendEmail({
+        to: data.customerEmail,
+        subject: `Refund Processed - ${data.serviceName}`,
+        html: template,
+      });
+      console.log(`✅ [EMAIL] Customer refund email sent to: ${data.customerEmail}`);
+    } catch (error) {
+      console.error(`❌ [EMAIL] Failed to send customer refund email:`, error);
+    }
+  }
+
+  /**
+   * Send vendor refund notification email
+   */
+  async sendVendorRefundNotificationEmail(data: {
+    vendorEmail: string;
+    vendorName: string;
+    serviceName: string;
+    amount: number;
+    currency: string;
+    reason: string;
+  }) {
+    try {
+      const template = getVendorRefundNotificationTemplate(data);
+      await this.sendEmail({
+        to: data.vendorEmail,
+        subject: `Service Refunded - ${data.serviceName}`,
+        html: template,
+      });
+      console.log(`✅ [EMAIL] Vendor refund notification email sent to: ${data.vendorEmail}`);
+    } catch (error) {
+      console.error(`❌ [EMAIL] Failed to send vendor refund notification email:`, error);
+    }
   }
 }

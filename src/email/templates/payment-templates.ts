@@ -54,7 +54,7 @@ export const getPaymentSuccessfulTemplate = (userName: string, paymentData: any)
         company_name: 'Urembo Hub',
         support_email: 'support@urembohub.com',
         base_url: 'https://urembohub.com',
-        logo_url: 'https://via.placeholder.com/200x60/252849/ffffff?text=Urembo+Hub'
+        logo_url: `${process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000'}/uploads/assets/logo.png`
       }
     })
   };
@@ -115,7 +115,7 @@ export const getPaymentFailedTemplate = (userName: string, paymentData: any) => 
         company_name: 'Urembo Hub',
         support_email: 'support@urembohub.com',
         base_url: 'https://urembohub.com',
-        logo_url: 'https://via.placeholder.com/200x60/252849/ffffff?text=Urembo+Hub'
+        logo_url: `${process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000'}/uploads/assets/logo.png`
       }
     })
   };

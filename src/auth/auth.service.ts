@@ -97,17 +97,41 @@ export class AuthService {
     });
 
     // Send welcome email
+    console.log('📧 [SIGNUP] Starting welcome email process...');
+    console.log('📧 [SIGNUP] User details:', {
+      email: user.email,
+      fullName: user.fullName || 'User',
+      role: user.role,
+      id: user.id
+    });
+    
     try {
-      await this.emailService.sendWelcomeEmail(
+      const welcomeEmailResult = await this.emailService.sendWelcomeEmail(
         user.email,
         user.fullName || 'User'
       );
+      
+      if (welcomeEmailResult.success) {
+        console.log('✅ [SIGNUP] Welcome email sent successfully!');
+        console.log('📧 [SIGNUP] Message ID:', welcomeEmailResult.messageId);
+      } else {
+        console.error('❌ [SIGNUP] Welcome email failed:', welcomeEmailResult.error);
+      }
     } catch (error) {
-      console.error('Failed to send welcome email:', error);
+      console.error('❌ [SIGNUP] Welcome email exception:', error);
       // Don't fail registration if email fails
     }
 
     // Send admin notification for signup
+    console.log('👨‍💼 [SIGNUP] Starting admin notification process...');
+    console.log('👨‍💼 [SIGNUP] User data for admin notification:', {
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      businessName: user.businessName,
+      createdAt: user.createdAt
+    });
+    
     try {
       await this.adminNotificationService.notifyAdminsOfSignup({
         email: user.email,
@@ -116,13 +140,23 @@ export class AuthService {
         businessName: user.businessName,
         createdAt: user.createdAt,
       });
+      console.log('✅ [SIGNUP] Admin notification sent successfully!');
     } catch (error) {
-      console.error('Failed to send admin signup notification:', error);
+      console.error('❌ [SIGNUP] Admin notification failed:', error);
       // Don't fail registration if admin notification fails
     }
 
     // Send partner-specific notifications
     if (user.role === 'vendor' || user.role === 'retailer' || user.role === 'manufacturer') {
+      console.log('🤝 [SIGNUP] Starting partner notification process...');
+      console.log('🤝 [SIGNUP] Partner details:', {
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role,
+        businessName: user.businessName,
+        createdAt: user.createdAt
+      });
+      
       try {
         await this.adminNotificationService.notifyPartnerSignup({
           email: user.email,
@@ -131,11 +165,33 @@ export class AuthService {
           businessName: user.businessName,
           createdAt: user.createdAt,
         });
+        console.log('✅ [SIGNUP] Partner notification sent successfully!');
       } catch (error) {
-        console.error('Failed to send partner signup notification:', error);
+        console.error('❌ [SIGNUP] Partner notification failed:', error);
         // Don't fail registration if partner notification fails
       }
+    } else {
+      console.log('ℹ️ [SIGNUP] User role is not a partner type, skipping partner notifications');
     }
+
+    // Registration completed successfully
+    console.log('🎉 [SIGNUP] Registration completed successfully!');
+    console.log('📊 [SIGNUP] Final user data:', {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      businessName: user.businessName,
+      isVerified: user.isVerified,
+      onboardingStatus: user.onboardingStatus
+    });
+    console.log('📧 [SIGNUP] Email notifications summary:');
+    console.log('  - Welcome email: Sent to user');
+    console.log('  - Admin notification: Sent to admins');
+    if (user.role === 'vendor' || user.role === 'retailer' || user.role === 'manufacturer') {
+      console.log('  - Partner notification: Sent to partner');
+    }
+    console.log('=' .repeat(60));
 
     const payload = { email: user.email, sub: user.id, role: user.role };
     return {

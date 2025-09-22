@@ -10,7 +10,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../app.module';
 import { EmailService } from '../email/email.service';
 
-const TEST_EMAIL = 'pablocasso20@gmail.com';
+const TEST_EMAIL = 'benardogutu65@gmail.com';
 const TEST_USER_NAME = 'Pablo Casso';
 
 async function testAvailableEmails() {

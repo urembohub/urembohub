@@ -140,6 +140,16 @@ model Profile {
   paymentDetailsVerified Boolean? @default(false) @map("payment_details_verified")
   paystackSubaccountId  String?   @map("paystack_subaccount_id")
   paystackSubaccountVerified Boolean? @default(false) @map("paystack_subaccount_verified")
+  paystackCommissionRate Float?   @map("paystack_commission_rate")
+  paystackSubaccountCreatedAt DateTime? @map("paystack_subaccount_created_at")
+  paystackSubaccountUpdatedAt DateTime? @map("paystack_subaccount_updated_at")
+  paystackSubaccountStatus String? @map("paystack_subaccount_status") // active, suspended, deleted
+  paystackSettlementBank String? @map("paystack_settlement_bank")
+  paystackAccountNumber String? @map("paystack_account_number")
+  paystackBusinessName String? @map("paystack_business_name")
+  paystackPrimaryContactEmail String? @map("paystack_primary_contact_email")
+  paystackPrimaryContactName String? @map("paystack_primary_contact_name")
+  paystackPrimaryContactPhone String? @map("paystack_primary_contact_phone")
   createdAt             DateTime? @map("created_at")
   updatedAt             DateTime? @map("updated_at")
 
@@ -167,6 +177,8 @@ model Profile {
   onboardingSubmissions OnboardingSubmission[]
   onboardingReviews     OnboardingReview[] @relation("OnboardingReviewUser")
   adminOnboardingReviews OnboardingReview[] @relation("OnboardingReviewAdmin")
+  onboardingHistory     OnboardingHistory[] @relation("OnboardingHistoryUser")
+  adminOnboardingHistory OnboardingHistory[] @relation("OnboardingHistoryAdmin")
   liveShoppingSessions  LiveShoppingSession[]
   liveShoppingSessionsAsRetailer LiveShoppingSession[] @relation("LiveShoppingRetailer")
   liveSessionMessages   LiveSessionMessage[]
@@ -174,6 +186,10 @@ model Profile {
   manufacturerOrders    ManufacturerOrder[]
   manufacturerOrdersAsManufacturer ManufacturerOrder[] @relation("ManufacturerOrderManufacturer")
   reviews               Review[]
+  vendorEscrows         ServiceEscrow[] @relation("VendorEscrows")
+  customerEscrows       ServiceEscrow[] @relation("CustomerEscrows")
+  createdEscrows        ServiceEscrow[] @relation("CreatedEscrows")
+  performedActions      EscrowAction[] @relation("PerformedActions")
 
   @@map("profiles")
 }
@@ -239,6 +255,7 @@ model Service {
   serviceSubcategory ServiceCategory? @relation("ServiceSubcategory", fields: [subcategoryId], references: [id])
   actualService     ServiceCategory? @relation("ServiceActual", fields: [actualServiceId], references: [id])
   wishlist          Wishlist[]
+  escrows           ServiceEscrow[]
 
   @@map("services")
 }
@@ -253,7 +270,7 @@ model Order {
   serviceId         String?     @map("service_id")
   serviceType       String?     @map("service_type")
   totalAmount       Decimal     @db.Decimal(10, 2) @map("total_amount")
-  currency          String      @default("USD")
+  currency          String      @default("KES")
   status            order_status @default(pending)
   statusEnhanced    order_status_enhanced? @map("status_enhanced")
   customerEmail     String      @map("customer_email")
@@ -264,6 +281,13 @@ model Order {
   escrowStatus      String?     @map("escrow_status")
   commissionAmount  Decimal?    @db.Decimal(10, 2) @map("commission_amount")
   commissionRate    Decimal?    @db.Decimal(5, 2) @map("commission_rate")
+  
+  // Payment fields
+  paymentReference  String?     @map("payment_reference")
+  paymentStatus     String?     @map("payment_status") // pending, paid, failed
+  paymentMethod     String?     @map("payment_method")
+  paymentAmount     Decimal?    @db.Decimal(10, 2) @map("payment_amount")
+  paidAt            DateTime?   @map("paid_at")
   paystackReference String?     @map("paystack_reference")
   confirmedAt       DateTime?   @map("confirmed_at")
   completedAt       DateTime?   @map("completed_at")
@@ -274,12 +298,13 @@ model Order {
   updatedAt         DateTime    @updatedAt @map("updated_at")
 
   // Relations
-  user              Profile?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user              Profile?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   orderItems        OrderItem[]
   serviceAppointments ServiceAppointment[]
   shipments         Shipment[]
   tickets           Ticket[]
   payments          Payment[]
+  escrows           ServiceEscrow[]
 
   @@map("orders")
 }
@@ -848,6 +873,25 @@ model OnboardingReview {
   @@map("onboarding_reviews")
 }
 
+model OnboardingHistory {
+  id              String            @id @default(uuid())
+  userId          String            @map("user_id")
+  adminId         String?           @map("admin_id")
+  action          String            // 'submission', 'status_change', 'approval', 'rejection', 'revision_requested'
+  details         Json?             // Flexible data for different action types
+  oldStatus       onboarding_status? @map("old_status")
+  newStatus       onboarding_status? @map("new_status")
+  reason          String?           // Reason for status change, rejection, etc.
+  metadata        Json?             // Additional context data
+  createdAt       DateTime          @default(now()) @map("created_at")
+
+  // Relations
+  user            Profile           @relation("OnboardingHistoryUser", fields: [userId], references: [id], onDelete: Cascade)
+  admin           Profile?          @relation("OnboardingHistoryAdmin", fields: [adminId], references: [id])
+
+  @@map("onboarding_history")
+}
+
 // CMS Models
 model CmsBanner {
   id                String    @id @default(uuid())
@@ -1151,5 +1195,86 @@ model Review {
 
   @@unique([userId, itemId, itemType])
   @@map("reviews")
+}
+
+model PaystackSplit {
+  id            String   @id @default(uuid())
+  splitCode     String   @unique @map("split_code")
+  subaccountId  String   @map("subaccount_id")
+  commissionRate Decimal @db.Decimal(5, 4) @map("commission_rate")
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("paystack_splits")
+}
+
+// Service Escrow System
+model ServiceEscrow {
+  id                String      @id @default(cuid())
+  orderId           String      @map("order_id")
+  serviceId         String      @map("service_id")
+  vendorId          String      @map("vendor_id")
+  customerId        String?     @map("customer_id")
+  amount            Decimal     @db.Decimal(10, 2)
+  currency          String      @default("KES")
+  status            EscrowStatus @default(pending)
+  paystackReference String?     @map("paystack_reference")
+  holdReference     String?     @map("hold_reference")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  releasedAt        DateTime?   @map("released_at")
+  autoReleaseDate   DateTime    @map("auto_release_date")
+  disputeReason     String?     @map("dispute_reason")
+  adminNotes        String?     @map("admin_notes")
+  createdBy         String?     @map("created_by")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  order             Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  service           Service         @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  vendor            Profile         @relation("VendorEscrows", fields: [vendorId], references: [id], onDelete: Cascade)
+  customer          Profile?        @relation("CustomerEscrows", fields: [customerId], references: [id], onDelete: SetNull)
+  creator           Profile?        @relation("CreatedEscrows", fields: [createdBy], references: [id])
+  actions           EscrowAction[]
+
+  @@map("service_escrows")
+}
+
+model EscrowAction {
+  id          String      @id @default(cuid())
+  escrowId    String      @map("escrow_id")
+  actionType  ActionType  @map("action_type")
+  performedBy String?     @map("performed_by")
+  reason      String?
+  metadata    Json?
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  // Relations
+  escrow      ServiceEscrow @relation(fields: [escrowId], references: [id], onDelete: Cascade)
+  performer   Profile?      @relation("PerformedActions", fields: [performedBy], references: [id])
+
+  @@map("escrow_actions")
+}
+
+enum EscrowStatus {
+  pending
+  in_progress
+  completed
+  released
+  disputed
+  refunded
+  expired
+}
+
+enum ActionType {
+  created
+  service_started
+  service_completed
+  customer_approved
+  customer_disputed
+  admin_released
+  admin_refunded
+  auto_released
+  dispute_resolved
 }
 

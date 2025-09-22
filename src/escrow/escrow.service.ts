@@ -1,521 +1,1030 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
-import axios from 'axios';
+import { ConfigService } from '@nestjs/config';
+import { PaystackService } from '../paystack/paystack.service';
+import { EscrowStatus, ActionType } from '@prisma/client';
 
-export interface EscrowTransaction {
+export interface CreateEscrowData {
   orderId: string;
-  customerId: string;
+  serviceId: string;
   vendorId: string;
+  customerId?: string;
   amount: number;
-  currency: string;
-  commissionRate: number;
-  platformAmount: number;
-  vendorAmount: number;
-  status: 'pending' | 'held' | 'released' | 'refunded' | 'disputed';
+  currency?: string;
   paystackReference?: string;
-  vendorSubaccountId?: string;
-  createdAt: Date;
-  releasedAt?: Date;
+  createdBy?: string;
 }
 
-export interface PaystackSubaccount {
-  id: string;
-  subaccount_code: string;
-  business_name: string;
-  description: string;
-  primary_contact_email: string;
-  primary_contact_name: string;
-  primary_contact_phone: string;
-  settlement_bank: string;
-  account_number: string;
-  percentage_charge: number;
-  is_verified: boolean;
+export interface EscrowActionData {
+  escrowId: string;
+  actionType: ActionType;
+  performedBy?: string;
+  reason?: string;
+  metadata?: any;
 }
 
 @Injectable()
 export class EscrowService {
   private readonly logger = new Logger(EscrowService.name);
-  private readonly paystackSecretKey: string;
-  private readonly paystackBaseUrl = 'https://api.paystack.co';
 
   constructor(
     private prisma: PrismaService,
-    private configService: ConfigService,
     private emailService: EmailService,
-  ) {
-    this.paystackSecretKey = this.configService.get<string>('PAYSTACK_SECRET_KEY');
-    if (!this.paystackSecretKey) {
-      this.logger.error('PAYSTACK_SECRET_KEY is not configured');
-    }
-  }
+    private configService: ConfigService,
+    private paystackService: PaystackService,
+  ) {}
 
   /**
-   * Create a Paystack subaccount for a vendor
+   * Create a new escrow for a service payment
    */
-  async createVendorSubaccount(vendorData: {
-    businessName: string;
-    email: string;
-    contactName: string;
-    phone: string;
-    bankCode: string;
-    accountNumber: string;
-    percentageCharge?: number;
-  }): Promise<PaystackSubaccount> {
+  async createEscrow(data: CreateEscrowData) {
     try {
-      const response = await axios.post(
-        `${this.paystackBaseUrl}/subaccount`,
-        {
-          business_name: vendorData.businessName,
-          settlement_bank: vendorData.bankCode,
-          account_number: vendorData.accountNumber,
-          percentage_charge: vendorData.percentageCharge || 0,
-          primary_contact_email: vendorData.email,
-          primary_contact_name: vendorData.contactName,
-          primary_contact_phone: vendorData.phone,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${this.paystackSecretKey}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+      console.log('🔒 [ESCROW] Creating escrow for service payment...');
+      console.log('🔒 [ESCROW] Order ID:', data.orderId);
+      console.log('🔒 [ESCROW] Service ID:', data.serviceId);
+      console.log('🔒 [ESCROW] Vendor ID:', data.vendorId);
+      console.log('🔒 [ESCROW] Amount:', data.amount);
 
-      const subaccount = response.data.data;
+      // Calculate auto-release date (48 hours from now)
+      const autoReleaseDate = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hours
       
-      // Store subaccount info in vendor profile
-      await this.prisma.profile.update({
-        where: { email: vendorData.email },
+      const escrow = await this.prisma.serviceEscrow.create({
         data: {
-          paystackSubaccountId: subaccount.subaccount_code,
-          paystackSubaccountVerified: subaccount.is_verified,
+          orderId: data.orderId,
+          serviceId: data.serviceId,
+          vendorId: data.vendorId,
+          customerId: data.customerId,
+          amount: data.amount,
+          currency: data.currency || 'KES',
+          paystackReference: data.paystackReference,
+          autoReleaseDate,
+          createdBy: data.createdBy,
+          status: EscrowStatus.pending,
         },
-      });
-
-      this.logger.log(`Created Paystack subaccount for vendor: ${vendorData.businessName}`);
-      return subaccount;
-    } catch (error) {
-      this.logger.error('Failed to create Paystack subaccount:', error.response?.data || error.message);
-      throw new Error('Failed to create vendor subaccount');
-    }
-  }
-
-  /**
-   * Initialize escrow for an order
-   */
-  async initializeEscrow(orderId: string, paymentReference: string): Promise<EscrowTransaction> {
-    try {
-      const order = await this.prisma.order.findUnique({
-        where: { id: orderId },
         include: {
-          user: true,
-          orderItems: {
+          order: {
             include: {
-              product: {
-                include: {
-                  retailer: true, // Vendor info
-                },
-              },
-            },
+              user: {
+                select: {
+                  email: true,
+                  fullName: true,
+                  businessName: true,
+                }
+              }
+            }
           },
-        },
-      });
-
-      if (!order) {
-        throw new Error('Order not found');
-      }
-
-      // Calculate commission (default 10% platform fee)
-      const commissionRate = 0.10; // 10%
-      const platformAmount = Number(order.totalAmount) * commissionRate;
-      const vendorAmount = Number(order.totalAmount) - platformAmount;
-
-      // Get vendor's Paystack subaccount
-      const vendor = order.orderItems[0]?.product?.retailer;
-      if (!vendor) {
-        throw new Error('Vendor not found for order');
-      }
-
-      const vendorProfile = await this.prisma.profile.findUnique({
-        where: { id: vendor.id },
-      });
-
-      if (!vendorProfile?.paystackSubaccountId) {
-        throw new Error('Vendor does not have a Paystack subaccount');
-      }
-
-      // Create escrow transaction
-      const escrowTransaction: EscrowTransaction = {
-        orderId,
-        customerId: order.userId,
-        vendorId: vendor.id,
-        amount: Number(order.totalAmount),
-        currency: order.currency,
-        commissionRate,
-        platformAmount: Number(platformAmount),
-        vendorAmount: Number(vendorAmount),
-        status: 'held',
-        paystackReference: paymentReference,
-        vendorSubaccountId: vendorProfile.paystackSubaccountId,
-        createdAt: new Date(),
-      };
-
-      // Update order with escrow information
-      await this.prisma.order.update({
-        where: { id: orderId },
-        data: {
-          escrowAmount: order.totalAmount,
-          escrowStatus: 'held',
-          commissionAmount: platformAmount,
-          commissionRate: commissionRate,
-          autoReleaseAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days auto-release
-        },
-      });
-
-      // Send escrow notification emails
-      await this.sendEscrowNotificationEmails(escrowTransaction);
-
-      this.logger.log(`Escrow initialized for order ${orderId}: ${vendorAmount} to vendor, ${platformAmount} to platform`);
-      return escrowTransaction;
-    } catch (error) {
-      this.logger.error('Failed to initialize escrow:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Release escrow funds to vendor
-   */
-  async releaseEscrow(orderId: string, reason?: string): Promise<boolean> {
-    try {
-      const order = await this.prisma.order.findUnique({
-        where: { id: orderId },
-        include: {
-          user: true,
-          orderItems: {
+          service: {
             include: {
-              product: {
-                include: {
-                  retailer: true,
-                },
-              },
-            },
+              vendor: {
+                select: {
+                  email: true,
+                  fullName: true,
+                  businessName: true,
+                  paystackSubaccountId: true,
+                  paystackSubaccountVerified: true,
+                }
+              }
+            }
           },
-        },
+          vendor: {
+            select: {
+              email: true,
+              fullName: true,
+              businessName: true,
+              paystackSubaccountId: true,
+              paystackSubaccountVerified: true,
+            }
+          },
+          customer: {
+            select: {
+              email: true,
+              fullName: true,
+              businessName: true,
+            }
+          }
+        }
       });
 
-      if (!order || order.escrowStatus !== 'held') {
-        throw new Error('Order not found or escrow not held');
-      }
-
-      const vendor = order.orderItems[0]?.product?.retailer;
-      const vendorProfile = await this.prisma.profile.findUnique({
-        where: { id: vendor.id },
+      // Log the creation action
+      await this.logAction({
+        escrowId: escrow.id,
+        actionType: ActionType.created,
+        performedBy: data.createdBy,
+        metadata: {
+          orderId: data.orderId,
+          serviceId: data.serviceId,
+          amount: data.amount,
+          autoReleaseDate: autoReleaseDate.toISOString(),
+        }
       });
 
-      if (!vendorProfile?.paystackSubaccountId) {
-        throw new Error('Vendor subaccount not found');
-      }
+      // Send notifications
+      await this.sendEscrowCreatedNotifications(escrow);
 
-      // Transfer funds to vendor's subaccount using Paystack transfer
-      const transferResponse = await this.transferToVendor(
-        vendorProfile.paystackSubaccountId,
-        Number(order.escrowAmount) - Number(order.commissionAmount),
-        order.currency,
-        `Payment for order ${orderId}`,
-        orderId
-      );
-
-      if (transferResponse.success) {
-        // Update order escrow status
-        await this.prisma.order.update({
-          where: { id: orderId },
-          data: {
-            escrowStatus: 'released',
-            completedAt: new Date(),
-          },
-        });
-
-        // Send release notification emails
-        await this.sendEscrowReleaseEmails(order, transferResponse.reference);
-
-        this.logger.log(`Escrow released for order ${orderId}: ${transferResponse.amount} transferred to vendor`);
-        return true;
-      } else {
-        throw new Error('Failed to transfer funds to vendor');
-      }
+      console.log('✅ [ESCROW] Escrow created successfully:', escrow.id);
+      return escrow;
     } catch (error) {
-      this.logger.error('Failed to release escrow:', error);
+      console.error('❌ [ESCROW] Failed to create escrow:', error);
       throw error;
     }
   }
 
   /**
-   * Refund escrow funds to customer
+   * Start service (vendor marks service as started)
    */
-  async refundEscrow(orderId: string, reason: string): Promise<boolean> {
+  async startService(escrowId: string, vendorId: string) {
     try {
-      const order = await this.prisma.order.findUnique({
-        where: { id: orderId },
-      });
+      console.log('🚀 [ESCROW] Starting service...');
+      console.log('🚀 [ESCROW] Escrow ID:', escrowId);
+      console.log('🚀 [ESCROW] Vendor ID:', vendorId);
 
-      if (!order || order.escrowStatus !== 'held') {
-        throw new Error('Order not found or escrow not held');
-      }
-
-      // Process refund through Paystack
-      const refundResponse = await this.processRefund(
-        order.paystackReference || '',
-        Number(order.escrowAmount),
-        reason
-      );
-
-      if (refundResponse.success) {
-        // Update order escrow status
-        await this.prisma.order.update({
-          where: { id: orderId },
-          data: {
-            escrowStatus: 'refunded',
-            disputedAt: new Date(),
-            notes: `${order.notes || ''}\nRefund reason: ${reason}`.trim(),
-          },
-        });
-
-        // Send refund notification emails
-        await this.sendEscrowRefundEmails(order, refundResponse.reference);
-
-        this.logger.log(`Escrow refunded for order ${orderId}: ${refundResponse.amount} refunded to customer`);
-        return true;
-      } else {
-        throw new Error('Failed to process refund');
-      }
-    } catch (error) {
-      this.logger.error('Failed to refund escrow:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Process automatic escrow release for completed orders
-   */
-  async processAutoRelease(): Promise<void> {
-    try {
-      const ordersToRelease = await this.prisma.order.findMany({
+      const escrow = await this.prisma.serviceEscrow.findFirst({
         where: {
-          escrowStatus: 'held',
-          autoReleaseAt: {
-            lte: new Date(),
-          },
-          status: 'completed',
+          id: escrowId,
+          vendorId: vendorId,
+          status: EscrowStatus.pending,
         },
+        include: {
+          service: true,
+          customer: true,
+          vendor: true,
+        }
       });
 
-      for (const order of ordersToRelease) {
-        try {
-          await this.releaseEscrow(order.id, 'Automatic release after completion');
-          this.logger.log(`Auto-released escrow for order ${order.id}`);
-        } catch (error) {
-          this.logger.error(`Failed to auto-release escrow for order ${order.id}:`, error);
-        }
+      if (!escrow) {
+        throw new NotFoundException('Escrow not found or not in pending status');
       }
 
-      this.logger.log(`Processed ${ordersToRelease.length} auto-releases`);
+      const updatedEscrow = await this.prisma.serviceEscrow.update({
+        where: { id: escrowId },
+        data: { status: EscrowStatus.in_progress },
+        include: {
+          service: true,
+          customer: true,
+          vendor: true,
+        }
+      });
+
+      // Log the action
+      await this.logAction({
+        escrowId,
+        actionType: ActionType.service_started,
+        performedBy: vendorId,
+        metadata: {
+          serviceName: escrow.service.name,
+          startedAt: new Date().toISOString(),
+        }
+      });
+
+      // Send notifications
+      await this.sendServiceStartedNotifications(updatedEscrow);
+
+      console.log('✅ [ESCROW] Service started successfully');
+      return updatedEscrow;
     } catch (error) {
-      this.logger.error('Failed to process auto-release:', error);
+      console.error('❌ [ESCROW] Failed to start service:', error);
+      throw error;
     }
   }
 
   /**
-   * Get escrow statistics
+   * Complete service (vendor marks service as completed)
    */
-  async getEscrowStats(): Promise<{
-    totalHeld: number;
-    totalReleased: number;
-    totalRefunded: number;
-    pendingOrders: number;
-  }> {
-    const stats = await this.prisma.order.aggregate({
-      where: {
-        escrowAmount: { not: null },
-      },
-      _sum: {
-        escrowAmount: true,
-      },
-    });
+  async completeService(escrowId: string, vendorId: string) {
+    try {
+      console.log('✅ [ESCROW] Completing service...');
+      console.log('✅ [ESCROW] Escrow ID:', escrowId);
+      console.log('✅ [ESCROW] Vendor ID:', vendorId);
 
-    const heldStats = await this.prisma.order.aggregate({
-      where: {
-        escrowStatus: 'held',
-      },
-      _sum: {
-        escrowAmount: true,
-      },
-      _count: {
-        id: true,
-      },
-    });
+      const escrow = await this.prisma.serviceEscrow.findFirst({
+        where: {
+          id: escrowId,
+          vendorId: vendorId,
+          status: EscrowStatus.in_progress,
+        },
+        include: {
+          service: true,
+          customer: true,
+          vendor: true,
+        }
+      });
 
-    const releasedStats = await this.prisma.order.aggregate({
-      where: {
-        escrowStatus: 'released',
-      },
-      _sum: {
-        escrowAmount: true,
-      },
-    });
+      if (!escrow) {
+        throw new NotFoundException('Escrow not found or not in progress');
+      }
 
-    const refundedStats = await this.prisma.order.aggregate({
-      where: {
-        escrowStatus: 'refunded',
-      },
-      _sum: {
-        escrowAmount: true,
-      },
-    });
+      const updatedEscrow = await this.prisma.serviceEscrow.update({
+        where: { id: escrowId },
+        data: { status: EscrowStatus.completed },
+        include: {
+          service: true,
+          customer: true,
+          vendor: true,
+        }
+      });
 
-    return {
-      totalHeld: Number(heldStats._sum.escrowAmount || 0),
-      totalReleased: Number(releasedStats._sum.escrowAmount || 0),
-      totalRefunded: Number(refundedStats._sum.escrowAmount || 0),
-      pendingOrders: heldStats._count.id || 0,
-    };
+      // Log the action
+      await this.logAction({
+        escrowId,
+        actionType: ActionType.service_completed,
+        performedBy: vendorId,
+        metadata: {
+          serviceName: escrow.service.name,
+          completedAt: new Date().toISOString(),
+        }
+      });
+
+      // Send notifications
+      await this.sendServiceCompletedNotifications(updatedEscrow);
+
+      console.log('✅ [ESCROW] Service completed successfully');
+      return updatedEscrow;
+    } catch (error) {
+      console.error('❌ [ESCROW] Failed to complete service:', error);
+      throw error;
+    }
   }
 
-  // Private helper methods
-
-  private async transferToVendor(
-    subaccountId: string,
-    amount: number,
-    currency: string,
-    reason: string,
-    orderId: string
-  ): Promise<{ success: boolean; reference?: string; amount?: number }> {
+  /**
+   * Customer approves service (releases funds to vendor)
+   */
+  async approveService(escrowId: string, customerId: string) {
     try {
-      const response = await axios.post(
-        `${this.paystackBaseUrl}/transfer`,
-        {
-          source: 'balance',
-          amount: amount * 100, // Paystack expects amount in kobo
-          recipient: subaccountId,
-          reason,
-          reference: `escrow_${orderId}_${Date.now()}`,
+      console.log('👍 [ESCROW] Customer approving service...');
+      console.log('👍 [ESCROW] Escrow ID:', escrowId);
+      console.log('👍 [ESCROW] Customer ID:', customerId);
+
+      const escrow = await this.prisma.serviceEscrow.findFirst({
+        where: {
+          id: escrowId,
+          customerId: customerId,
+          status: EscrowStatus.completed,
         },
-        {
-          headers: {
-            Authorization: `Bearer ${this.paystackSecretKey}`,
-            'Content-Type': 'application/json',
-          },
+        include: {
+          service: true,
+          customer: true,
+          vendor: true,
         }
+      });
+
+      if (!escrow) {
+        throw new NotFoundException('Escrow not found or not in completed status');
+      }
+
+      // Release funds to vendor
+      await this.releaseFunds(escrowId, customerId);
+
+      console.log('✅ [ESCROW] Service approved and funds released');
+      return escrow;
+    } catch (error) {
+      console.error('❌ [ESCROW] Failed to approve service:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Customer disputes service
+   */
+  async disputeService(escrowId: string, customerId: string, reason: string) {
+    try {
+      console.log('⚠️ [ESCROW] Customer disputing service...');
+      console.log('⚠️ [ESCROW] Escrow ID:', escrowId);
+      console.log('⚠️ [ESCROW] Customer ID:', customerId);
+      console.log('⚠️ [ESCROW] Reason:', reason);
+
+      const escrow = await this.prisma.serviceEscrow.findFirst({
+        where: {
+          id: escrowId,
+          customerId: customerId,
+          status: EscrowStatus.completed,
+        },
+        include: {
+          service: true,
+          customer: true,
+          vendor: true,
+        }
+      });
+
+      if (!escrow) {
+        throw new NotFoundException('Escrow not found or not in completed status');
+      }
+
+      const updatedEscrow = await this.prisma.serviceEscrow.update({
+        where: { id: escrowId },
+        data: {
+          status: EscrowStatus.disputed,
+          disputeReason: reason,
+        },
+        include: {
+          service: true,
+          customer: true,
+          vendor: true,
+        }
+      });
+
+      // Log the action
+      await this.logAction({
+        escrowId,
+        actionType: ActionType.customer_disputed,
+        performedBy: customerId,
+        reason,
+        metadata: {
+          serviceName: escrow.service.name,
+          disputedAt: new Date().toISOString(),
+        }
+      });
+
+      // Send notifications
+      await this.sendDisputeNotifications(updatedEscrow);
+
+      console.log('✅ [ESCROW] Service disputed successfully');
+      return updatedEscrow;
+    } catch (error) {
+      console.error('❌ [ESCROW] Failed to dispute service:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Admin releases funds manually
+   */
+  async adminReleaseFunds(escrowId: string, adminId: string, reason?: string) {
+    try {
+      console.log('👨‍💼 [ESCROW] Admin releasing funds...');
+      console.log('👨‍💼 [ESCROW] Escrow ID:', escrowId);
+      console.log('👨‍💼 [ESCROW] Admin ID:', adminId);
+
+      const escrow = await this.prisma.serviceEscrow.findUnique({
+        where: { id: escrowId },
+        include: {
+          service: true,
+          customer: true,
+          vendor: true,
+        }
+      });
+
+      if (!escrow) {
+        throw new NotFoundException('Escrow not found');
+      }
+
+      if (escrow.status === EscrowStatus.released) {
+        throw new Error('Funds already released');
+      }
+
+      // Check if vendor has a Paystack sub-account
+      if (!escrow.vendor.paystackSubaccountId) {
+        throw new Error('Vendor does not have a Paystack sub-account set up. Please set up sub-account first.');
+      }
+
+      // Initiate Paystack payout
+      const payoutResult = await this.paystackService.transferToSubaccount(
+        escrow.vendor.paystackSubaccountId,
+        Number(escrow.amount),
+        reason || `Escrow release for service: ${escrow.service.name}`,
+        `escrow_${escrowId}_${Date.now()}`
       );
 
-      return {
-        success: true,
-        reference: response.data.data.reference,
-        amount,
-      };
-    } catch (error) {
-      this.logger.error('Paystack transfer failed:', error.response?.data || error.message);
-      return { success: false };
-    }
-  }
+      if (!payoutResult.success) {
+        throw new Error(`Payout failed: ${payoutResult.message}`);
+      }
 
-  private async processRefund(
-    paymentReference: string,
-    amount: number,
-    reason: string
-  ): Promise<{ success: boolean; reference?: string; amount?: number }> {
-    try {
-      const response = await axios.post(
-        `${this.paystackBaseUrl}/refund`,
-        {
-          transaction: paymentReference,
-          amount: amount * 100, // Paystack expects amount in kobo
-          reason,
+      // Update escrow with payout details
+      const updatedEscrow = await this.prisma.serviceEscrow.update({
+        where: { id: escrowId },
+        data: {
+          status: EscrowStatus.released,
+          releasedAt: new Date(),
+          adminNotes: reason,
+          holdReference: payoutResult.data?.transferCode, // Store transfer code
         },
-        {
-          headers: {
-            Authorization: `Bearer ${this.paystackSecretKey}`,
-            'Content-Type': 'application/json',
-          },
+        include: {
+          service: true,
+          customer: true,
+          vendor: true,
         }
-      );
+      });
 
-      return {
-        success: true,
-        reference: response.data.data.reference,
-        amount,
+      // Log the action
+      await this.logAction({
+        escrowId,
+        actionType: ActionType.admin_released,
+        performedBy: adminId,
+        reason,
+        metadata: {
+          serviceName: escrow.service.name,
+          releasedAt: new Date().toISOString(),
+          amount: escrow.amount,
+          transferCode: payoutResult.data?.transferCode,
+          payoutStatus: payoutResult.data?.status,
+        }
+      });
+
+      // Send notifications
+      await this.sendFundsReleasedNotifications(updatedEscrow);
+
+      console.log('✅ [ESCROW] Admin released funds successfully with Paystack payout');
+      return updatedEscrow;
+    } catch (error) {
+      console.error('❌ [ESCROW] Failed to release funds:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Admin refunds customer
+   */
+  async adminRefundCustomer(escrowId: string, adminId: string, reason: string) {
+    try {
+      console.log('💰 [ESCROW] Admin refunding customer...');
+      console.log('💰 [ESCROW] Escrow ID:', escrowId);
+      console.log('💰 [ESCROW] Admin ID:', adminId);
+      console.log('💰 [ESCROW] Reason:', reason);
+
+      const escrow = await this.prisma.serviceEscrow.findUnique({
+        where: { id: escrowId },
+        include: {
+          service: true,
+          customer: true,
+          vendor: true,
+        }
+      });
+
+      if (!escrow) {
+        throw new NotFoundException('Escrow not found');
+      }
+
+      const updatedEscrow = await this.prisma.serviceEscrow.update({
+        where: { id: escrowId },
+        data: {
+          status: EscrowStatus.refunded,
+          releasedAt: new Date(),
+          adminNotes: reason,
+        },
+        include: {
+          service: true,
+          customer: true,
+          vendor: true,
+        }
+      });
+
+      // Log the action
+      await this.logAction({
+        escrowId,
+        actionType: ActionType.admin_refunded,
+        performedBy: adminId,
+        reason,
+        metadata: {
+          serviceName: escrow.service.name,
+          refundedAt: new Date().toISOString(),
+        }
+      });
+
+      // Send notifications
+      await this.sendRefundNotifications(updatedEscrow);
+
+      console.log('✅ [ESCROW] Customer refunded successfully');
+      return updatedEscrow;
+    } catch (error) {
+      console.error('❌ [ESCROW] Failed to refund customer:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Process auto-release for expired escrows
+   */
+  async processAutoRelease() {
+    try {
+      console.log('⏰ [ESCROW] Processing auto-release for expired escrows...');
+
+      const expiredEscrows = await this.prisma.serviceEscrow.findMany({
+        where: {
+          status: EscrowStatus.completed,
+          autoReleaseDate: {
+            lte: new Date()
+          }
+        },
+        include: {
+          service: true,
+          customer: true,
+          vendor: true,
+        }
+      });
+
+      console.log(`⏰ [ESCROW] Found ${expiredEscrows.length} expired escrows`);
+
+      for (const escrow of expiredEscrows) {
+        try {
+          await this.releaseFunds(escrow.id, 'system', 'Auto-released after 48 hours');
+          console.log(`✅ [ESCROW] Auto-released escrow: ${escrow.id}`);
+        } catch (error) {
+          console.error(`❌ [ESCROW] Failed to auto-release escrow ${escrow.id}:`, error);
+        }
+      }
+
+      console.log('✅ [ESCROW] Auto-release processing completed');
+    } catch (error) {
+      console.error('❌ [ESCROW] Failed to process auto-release:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Private method to release funds
+   */
+  private async releaseFunds(escrowId: string, releasedBy: string, reason?: string) {
+    const escrow = await this.prisma.serviceEscrow.update({
+      where: { id: escrowId },
+      data: {
+        status: EscrowStatus.released,
+        releasedAt: new Date(),
+        adminNotes: reason,
+      },
+      include: {
+        service: true,
+        customer: true,
+        vendor: true,
+      }
+    });
+
+    // Log the action
+    await this.logAction({
+      escrowId,
+      actionType: releasedBy === 'system' ? ActionType.auto_released : ActionType.admin_released,
+      performedBy: releasedBy,
+      reason,
+      metadata: {
+        serviceName: escrow.service.name,
+        releasedAt: new Date().toISOString(),
+        amount: escrow.amount,
+      }
+    });
+
+    // Send notifications
+    await this.sendFundsReleasedNotifications(escrow);
+  }
+
+  /**
+   * Log an escrow action
+   */
+  private async logAction(data: EscrowActionData) {
+    try {
+      await this.prisma.escrowAction.create({
+        data: {
+          escrowId: data.escrowId,
+          actionType: data.actionType,
+          performedBy: data.performedBy,
+          reason: data.reason,
+          metadata: data.metadata,
+        }
+      });
+    } catch (error) {
+      console.error('❌ [ESCROW] Failed to log action:', error);
+    }
+  }
+
+  /**
+   * Send escrow created notifications
+   */
+  private async sendEscrowCreatedNotifications(escrow: any) {
+    try {
+      // Notify vendor
+      if (escrow.vendor?.email) {
+        await this.emailService.sendVendorEscrowCreatedEmail({
+          vendorEmail: escrow.vendor.email,
+          vendorName: escrow.vendor.fullName || escrow.vendor.businessName,
+          serviceName: escrow.service.name,
+          amount: escrow.amount,
+          currency: escrow.currency,
+          autoReleaseDate: escrow.autoReleaseDate,
+        });
+      }
+
+      // Notify customer
+      if (escrow.customer?.email) {
+        await this.emailService.sendCustomerEscrowCreatedEmail({
+          customerEmail: escrow.customer.email,
+          customerName: escrow.customer.fullName || escrow.customer.businessName,
+          serviceName: escrow.service.name,
+          amount: escrow.amount,
+          currency: escrow.currency,
+          autoReleaseDate: escrow.autoReleaseDate,
+        });
+      }
+
+      // Notify admin
+      await this.emailService.sendAdminEscrowCreatedEmail({
+        serviceName: escrow.service.name,
+        vendorName: escrow.vendor.fullName || escrow.vendor.businessName,
+        customerName: escrow.customer?.fullName || escrow.customer?.businessName || 'Guest',
+        amount: escrow.amount,
+        currency: escrow.currency,
+        autoReleaseDate: escrow.autoReleaseDate,
+      });
+    } catch (error) {
+      console.error('❌ [ESCROW] Failed to send escrow created notifications:', error);
+    }
+  }
+
+  /**
+   * Send service started notifications
+   */
+  private async sendServiceStartedNotifications(escrow: any) {
+    try {
+      // Notify customer
+      if (escrow.customer?.email) {
+        await this.emailService.sendCustomerServiceStartedEmail({
+          customerEmail: escrow.customer.email,
+          customerName: escrow.customer.fullName || escrow.customer.businessName,
+          serviceName: escrow.service.name,
+          vendorName: escrow.vendor.fullName || escrow.vendor.businessName,
+        });
+      }
+    } catch (error) {
+      console.error('❌ [ESCROW] Failed to send service started notifications:', error);
+    }
+  }
+
+  /**
+   * Send service completed notifications
+   */
+  private async sendServiceCompletedNotifications(escrow: any) {
+    try {
+      // Notify customer
+      if (escrow.customer?.email) {
+        await this.emailService.sendCustomerServiceCompletedEmail({
+          customerEmail: escrow.customer.email,
+          customerName: escrow.customer.fullName || escrow.customer.businessName,
+          serviceName: escrow.service.name,
+          vendorName: escrow.vendor.fullName || escrow.vendor.businessName,
+          escrowId: escrow.id,
+        });
+      }
+    } catch (error) {
+      console.error('❌ [ESCROW] Failed to send service completed notifications:', error);
+    }
+  }
+
+  /**
+   * Send dispute notifications
+   */
+  private async sendDisputeNotifications(escrow: any) {
+    try {
+      // Notify admin
+      await this.emailService.sendAdminDisputeNotificationEmail({
+        serviceName: escrow.service.name,
+        vendorName: escrow.vendor.fullName || escrow.vendor.businessName,
+        customerName: escrow.customer?.fullName || escrow.customer?.businessName || 'Guest',
+        disputeReason: escrow.disputeReason,
+        escrowId: escrow.id,
+        amount: escrow.amount,
+        currency: escrow.currency,
+      });
+
+      // Notify vendor
+      if (escrow.vendor?.email) {
+        await this.emailService.sendVendorDisputeNotificationEmail({
+          vendorEmail: escrow.vendor.email,
+          vendorName: escrow.vendor.fullName || escrow.vendor.businessName,
+          serviceName: escrow.service.name,
+          disputeReason: escrow.disputeReason,
+          escrowId: escrow.id,
+        });
+      }
+    } catch (error) {
+      console.error('❌ [ESCROW] Failed to send dispute notifications:', error);
+    }
+  }
+
+  /**
+   * Send funds released notifications
+   */
+  private async sendFundsReleasedNotifications(escrow: any) {
+    try {
+      // Notify vendor
+      if (escrow.vendor?.email) {
+        await this.emailService.sendVendorFundsReleasedEmail({
+          vendorEmail: escrow.vendor.email,
+          vendorName: escrow.vendor.fullName || escrow.vendor.businessName,
+          serviceName: escrow.service.name,
+          amount: escrow.amount,
+          currency: escrow.currency,
+        });
+      }
+
+      // Notify customer
+      if (escrow.customer?.email) {
+        await this.emailService.sendCustomerFundsReleasedEmail({
+          customerEmail: escrow.customer.email,
+          customerName: escrow.customer.fullName || escrow.customer.businessName,
+          serviceName: escrow.service.name,
+          amount: escrow.amount,
+          currency: escrow.currency,
+        });
+      }
+    } catch (error) {
+      console.error('❌ [ESCROW] Failed to send funds released notifications:', error);
+    }
+  }
+
+  /**
+   * Send refund notifications
+   */
+  private async sendRefundNotifications(escrow: any) {
+    try {
+      // Notify customer
+      if (escrow.customer?.email) {
+        await this.emailService.sendCustomerRefundEmail({
+          customerEmail: escrow.customer.email,
+          customerName: escrow.customer.fullName || escrow.customer.businessName,
+          serviceName: escrow.service.name,
+          amount: escrow.amount,
+          currency: escrow.currency,
+          reason: escrow.adminNotes,
+        });
+      }
+
+      // Notify vendor
+      if (escrow.vendor?.email) {
+        await this.emailService.sendVendorRefundNotificationEmail({
+          vendorEmail: escrow.vendor.email,
+          vendorName: escrow.vendor.fullName || escrow.vendor.businessName,
+          serviceName: escrow.service.name,
+          amount: escrow.amount,
+          currency: escrow.currency,
+          reason: escrow.adminNotes,
+        });
+      }
+    } catch (error) {
+      console.error('❌ [ESCROW] Failed to send refund notifications:', error);
+    }
+  }
+
+  /**
+   * Get escrow by ID
+   */
+  async getEscrowById(escrowId: string) {
+    return await this.prisma.serviceEscrow.findUnique({
+      where: { id: escrowId },
+      include: {
+        order: true,
+        service: {
+          include: {
+            vendor: {
+              select: {
+                id: true,
+                email: true,
+                fullName: true,
+                businessName: true,
+              }
+            }
+          }
+        },
+        vendor: {
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            businessName: true,
+            paystackSubaccountId: true,
+            paystackSubaccountVerified: true,
+          }
+        },
+        customer: {
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            businessName: true,
+            paystackSubaccountId: true,
+            paystackSubaccountVerified: true,
+          }
+        },
+        actions: {
+          orderBy: { createdAt: 'desc' }
+        }
+      }
+    });
+  }
+
+  /**
+   * Get escrows by vendor
+   */
+  async getEscrowsByVendor(vendorId: string, status?: EscrowStatus) {
+    const where: any = { vendorId };
+    if (status) {
+      where.status = status;
+    }
+
+    return await this.prisma.serviceEscrow.findMany({
+      where,
+      include: {
+        service: true,
+        customer: {
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            businessName: true,
+            paystackSubaccountId: true,
+            paystackSubaccountVerified: true,
+          }
+        },
+        actions: {
+          orderBy: { createdAt: 'desc' },
+          take: 5
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+  }
+
+  /**
+   * Get escrows by customer
+   */
+  async getEscrowsByCustomer(customerId: string, status?: EscrowStatus) {
+    const where: any = { customerId };
+    if (status) {
+      where.status = status;
+    }
+
+    return await this.prisma.serviceEscrow.findMany({
+      where,
+      include: {
+        service: {
+          include: {
+            vendor: {
+              select: {
+                id: true,
+                email: true,
+                fullName: true,
+                businessName: true,
+              }
+            }
+          }
+        },
+        vendor: {
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            businessName: true,
+            paystackSubaccountId: true,
+            paystackSubaccountVerified: true,
+          }
+        },
+        actions: {
+          orderBy: { createdAt: 'desc' },
+          take: 5
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+  }
+
+  /**
+   * Get all escrows for admin
+   */
+  async getAllEscrows(status?: EscrowStatus) {
+    const where: any = {};
+    if (status) {
+      where.status = status;
+    }
+
+    return await this.prisma.serviceEscrow.findMany({
+      where,
+      include: {
+        service: true,
+        vendor: {
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            businessName: true,
+            paystackSubaccountId: true,
+            paystackSubaccountVerified: true,
+          }
+        },
+        customer: {
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            businessName: true,
+            paystackSubaccountId: true,
+            paystackSubaccountVerified: true,
+          }
+        },
+        actions: {
+          orderBy: { createdAt: 'desc' },
+          take: 3
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+  }
+
+  /**
+   * Get escrow statistics (admin only)
+   */
+  async getEscrowStats() {
+    try {
+      console.log('🔍 [ESCROW_SERVICE] getEscrowStats called');
+      
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      console.log('🔍 [ESCROW_SERVICE] Today:', today);
+      console.log('🔍 [ESCROW_SERVICE] Tomorrow:', tomorrow);
+
+      const [
+        totalEscrowAmount,
+        pendingEscrows,
+        completedEscrows,
+        disputedEscrows,
+        releasedToday,
+        autoReleasePending,
+      ] = await Promise.all([
+        // Total escrow amount (pending + in_progress + completed)
+        this.prisma.serviceEscrow.aggregate({
+          where: {
+            status: {
+              in: [EscrowStatus.pending, EscrowStatus.in_progress, EscrowStatus.completed],
+            },
+          },
+          _sum: {
+            amount: true,
+          },
+        }),
+        
+        // Pending escrows count
+        this.prisma.serviceEscrow.count({
+          where: {
+            status: EscrowStatus.pending,
+          },
+        }),
+        
+        // Completed escrows count
+        this.prisma.serviceEscrow.count({
+          where: {
+            status: EscrowStatus.completed,
+          },
+        }),
+        
+        // Disputed escrows count
+        this.prisma.serviceEscrow.count({
+          where: {
+            status: EscrowStatus.disputed,
+          },
+        }),
+        
+        // Released today count
+        this.prisma.serviceEscrow.count({
+          where: {
+            status: EscrowStatus.released,
+            releasedAt: {
+              gte: today,
+              lt: tomorrow,
+            },
+          },
+        }),
+        
+        // Auto-release pending count (completed escrows with auto-release date in the past)
+        this.prisma.serviceEscrow.count({
+          where: {
+            status: EscrowStatus.completed,
+            autoReleaseDate: {
+              lte: new Date(),
+            },
+          },
+        }),
+      ]);
+
+      console.log('🔍 [ESCROW_SERVICE] Raw results:');
+      console.log('  totalEscrowAmount:', totalEscrowAmount);
+      console.log('  pendingEscrows:', pendingEscrows);
+      console.log('  completedEscrows:', completedEscrows);
+      console.log('  disputedEscrows:', disputedEscrows);
+      console.log('  releasedToday:', releasedToday);
+      console.log('  autoReleasePending:', autoReleasePending);
+
+      const result = {
+        totalEscrowAmount: Number(totalEscrowAmount._sum.amount) || 0,
+        pendingEscrows,
+        completedEscrows,
+        disputedEscrows,
+        releasedToday,
+        autoReleasePending,
       };
-    } catch (error) {
-      this.logger.error('Paystack refund failed:', error.response?.data || error.message);
-      return { success: false };
-    }
-  }
 
-  private async sendEscrowNotificationEmails(escrow: EscrowTransaction): Promise<void> {
-    try {
-      // Send email to customer
-      await this.emailService.sendEmail({
-        to: 'customer@example.com', // Get from order
-        subject: 'Payment Secured in Escrow - Urembo Hub',
-        html: `
-          <h2>Payment Secured in Escrow</h2>
-          <p>Your payment of ${escrow.currency} ${escrow.amount} has been secured in our escrow system.</p>
-          <p>Funds will be released to the vendor upon successful completion of your order.</p>
-          <p><strong>Order ID:</strong> ${escrow.orderId}</p>
-        `,
-      });
-
-      // Send email to vendor
-      await this.emailService.sendEmail({
-        to: 'vendor@example.com', // Get from vendor profile
-        subject: 'Payment Received in Escrow - Urembo Hub',
-        html: `
-          <h2>Payment Received in Escrow</h2>
-          <p>A payment of ${escrow.currency} ${escrow.vendorAmount} has been received for your order.</p>
-          <p>Funds will be released to your account upon order completion.</p>
-          <p><strong>Order ID:</strong> ${escrow.orderId}</p>
-        `,
-      });
+      console.log('🔍 [ESCROW_SERVICE] Final result:', result);
+      return result;
     } catch (error) {
-      this.logger.error('Failed to send escrow notification emails:', error);
-    }
-  }
-
-  private async sendEscrowReleaseEmails(order: any, transferReference: string): Promise<void> {
-    try {
-      // Send email to vendor
-      await this.emailService.sendEmail({
-        to: 'vendor@example.com',
-        subject: 'Escrow Released - Payment Sent - Urembo Hub',
-        html: `
-          <h2>Escrow Released - Payment Sent</h2>
-          <p>Your payment of ${order.currency} ${Number(order.escrowAmount) - Number(order.commissionAmount)} has been released and sent to your account.</p>
-          <p><strong>Transfer Reference:</strong> ${transferReference}</p>
-          <p><strong>Order ID:</strong> ${order.id}</p>
-        `,
-      });
-    } catch (error) {
-      this.logger.error('Failed to send escrow release emails:', error);
-    }
-  }
-
-  private async sendEscrowRefundEmails(order: any, refundReference: string): Promise<void> {
-    try {
-      // Send email to customer
-      await this.emailService.sendEmail({
-        to: 'customer@example.com',
-        subject: 'Escrow Refunded - Urembo Hub',
-        html: `
-          <h2>Escrow Refunded</h2>
-          <p>Your payment of ${order.currency} ${order.escrowAmount} has been refunded to your original payment method.</p>
-          <p><strong>Refund Reference:</strong> ${refundReference}</p>
-          <p><strong>Order ID:</strong> ${order.id}</p>
-        `,
-      });
-    } catch (error) {
-      this.logger.error('Failed to send escrow refund emails:', error);
+      console.error('❌ [ESCROW_SERVICE] Error in getEscrowStats:', error);
+      throw error;
     }
   }
 }

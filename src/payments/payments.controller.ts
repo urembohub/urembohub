@@ -10,6 +10,16 @@ export class PaymentsController {
     return this.paymentsService.initializePayment(paymentData);
   }
 
+  @Post('initialize-group')
+  async initializePaymentGroup(@Body() paymentGroupData: any) {
+    return this.paymentsService.initializePaymentGroup(paymentGroupData);
+  }
+
+  @Get('calculate-splits/:orderId')
+  async calculatePaymentSplits(@Param('orderId') orderId: string) {
+    return this.paymentsService.calculatePaymentSplits(orderId);
+  }
+
   @Post('process/:orderId')
   async processPayment(
     @Param('orderId') orderId: string,

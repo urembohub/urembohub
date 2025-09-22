@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
+import { OnboardingHistoryService } from './onboarding-history.service';
+import { AdminNotificationService } from '../admin/admin-notification.service';
 import { user_role, onboarding_status, onboarding_field_type } from '@prisma/client';
 import { CreateRequirementDto } from './dto/create-requirement.dto';
 import { UpdateRequirementDto } from './dto/update-requirement.dto';
@@ -13,6 +15,8 @@ export class OnboardingService {
   constructor(
     private prisma: PrismaService,
     private emailService: EmailService,
+    private onboardingHistoryService: OnboardingHistoryService,
+    private adminNotificationService: AdminNotificationService,
   ) {}
 
   // Requirements Management
@@ -94,8 +98,69 @@ export class OnboardingService {
     });
   }
 
+  // Save payment details directly to Profile table
+  async savePaymentDetails(userId: string, paymentDataJson: string) {
+    try {
+      const paymentData = JSON.parse(paymentDataJson);
+      console.log('💳 Saving payment details to Profile:', { userId, paymentData });
+
+      // First check if profile exists
+      const existingProfile = await this.prisma.profile.findUnique({
+        where: { id: userId },
+        select: { id: true, paymentAccountType: true, paymentAccountDetails: true }
+      });
+
+      console.log('🔍 Existing profile before update:', existingProfile);
+
+      const updatedProfile = await this.prisma.profile.update({
+        where: { id: userId },
+        data: {
+          paymentAccountType: paymentData.accountType,
+          paymentAccountDetails: paymentData.accountDetails,
+          paymentDetailsVerified: false, // Reset verification when details change
+        },
+      });
+
+      console.log('✅ Payment details saved successfully:', {
+        id: updatedProfile.id,
+        paymentAccountType: updatedProfile.paymentAccountType,
+        paymentAccountDetails: updatedProfile.paymentAccountDetails
+      });
+
+      // Create a mock submission for consistency with the frontend
+      const mockSubmission = {
+        id: 'payment_details_' + Date.now(),
+        userId,
+        requirementId: 'payment_details',
+        value: paymentDataJson,
+        fileUrl: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        requirement: {
+          id: 'payment_details',
+          label: 'Payment Details',
+          fieldType: 'payment_details',
+          isMandatory: true,
+        },
+      };
+
+      return mockSubmission;
+    } catch (error) {
+      console.error('❌ Failed to save payment details:', error);
+      throw new Error('Failed to save payment details: ' + error.message);
+    }
+  }
+
   // Submissions Management
   async submitRequirement(userId: string, submitRequirementDto: SubmitRequirementDto) {
+    console.log('📝 submitRequirement called with:', { userId, requirementId: submitRequirementDto.requirementId });
+    
+    // Special handling for payment details - save directly to Profile table
+    if (submitRequirementDto.requirementId === 'payment_details') {
+      console.log('💳 Payment details detected, calling savePaymentDetails');
+      return this.savePaymentDetails(userId, submitRequirementDto.value);
+    }
+
     // Verify requirement exists and is active
     const requirement = await this.prisma.onboardingRequirement.findFirst({
       where: {
@@ -118,9 +183,10 @@ export class OnboardingService {
       },
     });
 
+    let submission;
     if (existingSubmission) {
       // Update existing submission
-      return this.prisma.onboardingSubmission.update({
+      submission = await this.prisma.onboardingSubmission.update({
         where: { id: existingSubmission.id },
         data: {
           value: submitRequirementDto.value,
@@ -129,7 +195,7 @@ export class OnboardingService {
       });
     } else {
       // Create new submission
-      return this.prisma.onboardingSubmission.create({
+      submission = await this.prisma.onboardingSubmission.create({
         data: {
           userId,
           requirementId: submitRequirementDto.requirementId,
@@ -138,6 +204,17 @@ export class OnboardingService {
         },
       });
     }
+
+    // Log submission history
+    await this.onboardingHistoryService.logSubmission(
+      userId,
+      submitRequirementDto.requirementId,
+      requirement.fieldType,
+      !!submitRequirementDto.fileUrl,
+      submitRequirementDto.value
+    );
+
+    return submission;
   }
 
   async bulkSubmitRequirements(userId: string, bulkSubmitDto: BulkSubmitDto) {
@@ -158,25 +235,155 @@ export class OnboardingService {
       }
     }
 
-    // Update user's onboarding status to submitted if there were successful submissions
+    // Check if all requirements are completed and update status
     if (hasSuccessfulSubmissions) {
-      await this.prisma.profile.update({
+      const user = await this.prisma.profile.findUnique({
         where: { id: userId },
-        data: { onboardingStatus: 'submitted' },
+        select: { onboardingStatus: true, role: true }
       });
+
+      if (user) {
+        // Get all active requirements for this user's role
+        const requirements = await this.prisma.onboardingRequirement.findMany({
+          where: {
+            role: user.role as any,
+            isActive: true,
+          },
+        });
+
+        // Get all submissions for this user
+        const submissions = await this.prisma.onboardingSubmission.findMany({
+          where: { userId },
+        });
+
+        // Check if all mandatory requirements are completed
+        const mandatoryRequirements = requirements.filter(req => req.isMandatory);
+        const completedMandatory = mandatoryRequirements.filter(req => 
+          submissions.some(sub => sub.requirementId === req.id && (sub.value || sub.fileUrl))
+        );
+
+        console.log('🔍 [ONBOARDING] Debug - Requirements check:');
+        console.log('  - Total requirements:', requirements.length);
+        console.log('  - Mandatory requirements:', mandatoryRequirements.length);
+        console.log('  - Completed mandatory:', completedMandatory.length);
+        console.log('  - User role:', user.role);
+
+        const oldStatus = user.onboardingStatus;
+        let newStatus = user.onboardingStatus;
+
+        // If all mandatory requirements are completed, change status to submitted
+        if (completedMandatory.length === mandatoryRequirements.length) {
+          newStatus = 'submitted';
+          
+          // Update user status
+          const updatedUser = await this.prisma.profile.update({
+            where: { id: userId },
+            data: { onboardingStatus: newStatus },
+          });
+
+          // Log status change
+          await this.onboardingHistoryService.logStatusChange(
+            userId,
+            oldStatus,
+            newStatus,
+            'All mandatory requirements completed'
+          );
+
+          // Send admin notification for new submission
+          console.log('📧 [ONBOARDING] Sending admin notification for new submission...');
+          try {
+            await this.adminNotificationService.notifyAdminsOfOnboardingSubmission({
+              businessName: updatedUser.businessName,
+              fullName: updatedUser.fullName,
+              email: updatedUser.email,
+              role: updatedUser.role,
+              submittedAt: new Date().toLocaleDateString()
+            });
+            console.log('✅ [ONBOARDING] Admin notification sent successfully!');
+          } catch (error) {
+            console.error('❌ [ONBOARDING] Failed to send admin notification:', error);
+            // Don't fail the submission if admin notification fails
+          }
+        }
+      }
     }
 
     return results;
   }
 
   async getUserSubmissions(userId: string) {
-    return this.prisma.onboardingSubmission.findMany({
+    console.log(`📋 Backend: getUserSubmissions called for user: ${userId}`);
+    
+    const submissions = await this.prisma.onboardingSubmission.findMany({
       where: { userId },
       include: {
         requirement: true,
       },
       orderBy: { createdAt: 'desc' },
     });
+    
+    console.log(`📋 Backend: Found ${submissions.length} regular submissions for user ${userId}`);
+    
+    // Get payment details from Profile table
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: userId },
+      select: {
+        paymentAccountType: true,
+        paymentAccountDetails: true,
+        paymentDetailsVerified: true,
+      },
+    });
+
+    console.log('💳 Backend: Profile payment details:', profile);
+
+    // Add payment details as a submission if they exist
+    if (profile?.paymentAccountType && profile?.paymentAccountDetails) {
+      const paymentData = {
+        accountType: profile.paymentAccountType,
+        accountDetails: profile.paymentAccountDetails,
+      };
+
+      console.log('💳 Backend: Creating payment submission with data:', paymentData);
+
+      const paymentSubmission = {
+        id: 'payment_details_' + userId,
+        userId,
+        requirementId: 'payment_details',
+        value: JSON.stringify(paymentData),
+        fileUrl: null,
+        createdAt: new Date(), // Use current date as we don't have the original creation date
+        updatedAt: new Date(),
+        requirement: {
+          id: 'payment_details',
+          role: 'retailer' as any, // Default role for payment details
+          label: 'Payment Details',
+          fieldType: 'payment_details' as any,
+          isMandatory: true,
+          description: 'Payment information for receiving payouts',
+          placeholder: 'Select payment method',
+          selectOptions: null,
+          position: 999,
+          isActive: true,
+          isPaymentRelated: true,
+          validationRules: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      };
+
+      // Add payment submission to the beginning of the array
+      submissions.unshift(paymentSubmission);
+      console.log('✅ Backend: Added payment details submission from Profile. Total submissions now:', submissions.length);
+    } else {
+      console.log('❌ Backend: No payment details found in Profile. Profile data:', {
+        hasAccountType: !!profile?.paymentAccountType,
+        hasAccountDetails: !!profile?.paymentAccountDetails,
+        accountType: profile?.paymentAccountType,
+        accountDetails: profile?.paymentAccountDetails
+      });
+    }
+    
+    return submissions;
   }
 
   async getUserSubmissionByRequirement(userId: string, requirementId: string) {
@@ -228,6 +435,8 @@ export class OnboardingService {
       throw new NotFoundException('User not found');
     }
 
+    const oldStatus = user.onboardingStatus;
+
     // Create review
     const review = await this.prisma.onboardingReview.create({
       data: {
@@ -246,6 +455,35 @@ export class OnboardingService {
         onboardingStatus: reviewSubmissionDto.status,
       },
     });
+
+    // Log admin action based on status
+    if (reviewSubmissionDto.status === 'approved') {
+      await this.onboardingHistoryService.logApproval(
+        reviewSubmissionDto.userId,
+        adminId,
+        reviewSubmissionDto.notes
+      );
+    } else if (reviewSubmissionDto.status === 'rejected') {
+      await this.onboardingHistoryService.logRejection(
+        reviewSubmissionDto.userId,
+        adminId,
+        reviewSubmissionDto.rejectionReason || 'No reason provided'
+      );
+    } else if (reviewSubmissionDto.status === 'revision_requested') {
+      await this.onboardingHistoryService.logRevisionRequest(
+        reviewSubmissionDto.userId,
+        adminId,
+        reviewSubmissionDto.notes || 'Additional information required'
+      );
+    }
+
+    // Log status change
+    await this.onboardingHistoryService.logStatusChange(
+      reviewSubmissionDto.userId,
+      oldStatus,
+      reviewSubmissionDto.status,
+      `Admin action: ${reviewSubmissionDto.status}`
+    );
 
     return review;
   }
@@ -353,19 +591,35 @@ export class OnboardingService {
     // Send appropriate email based on status
     try {
       if (status === onboarding_status.approved) {
+        console.log('📧 [ONBOARDING] Sending profile approved email...');
         await this.emailService.sendProfileApprovedEmail(
           user.email,
           user.fullName || 'User'
         );
+        console.log('✅ [ONBOARDING] Profile approved email sent successfully!');
       } else if (status === onboarding_status.rejected) {
+        console.log('📧 [ONBOARDING] Sending profile rejected email...');
         await this.emailService.sendProfileRejectedEmail(
           user.email,
           user.fullName || 'User',
           rejectionReason || 'Profile requirements not met'
         );
+        console.log('✅ [ONBOARDING] Profile rejected email sent successfully!');
+      } else if (status === onboarding_status.revision_requested) {
+        console.log('📧 [ONBOARDING] Sending revision request email...');
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
+        const resubmissionUrl = `${frontendUrl}/onboarding`;
+        
+        await this.emailService.sendOnboardingRevisionRequestEmail(
+          user.email,
+          user.fullName || 'User',
+          notes || 'Additional information required for verification',
+          resubmissionUrl
+        );
+        console.log('✅ [ONBOARDING] Revision request email sent successfully!');
       }
     } catch (error) {
-      console.error('Failed to send onboarding status email:', error);
+      console.error('❌ [ONBOARDING] Failed to send onboarding status email:', error);
       // Don't fail the status update if email fails
     }
 

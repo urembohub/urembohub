@@ -102,7 +102,7 @@ export class OrdersService {
       });
     }
 
-    // Send order confirmation email
+    // Send order confirmation email to customer
     try {
       const orderDataForEmail = {
         orderId: order.id,
@@ -116,10 +116,14 @@ export class OrdersService {
         order.id,
         orderDataForEmail
       );
+      console.log('✅ [ORDER] Customer order confirmation email sent successfully!');
     } catch (error) {
-      console.error('Failed to send order confirmation email:', error);
+      console.error('❌ [ORDER] Failed to send customer order confirmation email:', error);
       // Don't fail order creation if email fails
     }
+
+    // Send notifications to vendors, retailers, and manufacturers
+    await this.sendOrderNotificationsToPartners(order.id, cartItems, orderData);
 
     return this.getOrderById(order.id);
   }
@@ -629,5 +633,99 @@ export class OrdersService {
         createdAt: 'desc',
       },
     });
+  }
+
+  /**
+   * Send order notifications to vendors, retailers, and manufacturers
+   */
+  private async sendOrderNotificationsToPartners(orderId: string, cartItems: any[], orderData: any) {
+    try {
+      console.log('📧 [ORDER] Starting partner notifications for order:', orderId);
+      
+      // Get unique vendor/retailer/manufacturer IDs from cart items
+      const partnerIds = new Set<string>();
+      
+      // Collect vendor IDs from service items
+      cartItems.forEach(item => {
+        if (item.type === 'service' && item.vendorId) {
+          partnerIds.add(item.vendorId);
+        }
+        if (item.type === 'product' && item.vendorId) {
+          partnerIds.add(item.vendorId);
+        }
+      });
+
+      // Get partner details from database
+      const partners = await this.prisma.profile.findMany({
+        where: {
+          id: { in: Array.from(partnerIds) },
+        },
+        select: {
+          id: true,
+          email: true,
+          fullName: true,
+          role: true,
+          businessName: true,
+        },
+      });
+
+      console.log('📧 [ORDER] Found partners to notify:', partners.length);
+
+      // Send notifications to each partner
+      for (const partner of partners) {
+        try {
+          const orderDataForPartner = {
+            order_number: orderId,
+            customer_name: orderData.customerEmail,
+            total_amount: orderData.totalAmount.toString(),
+            order_date: new Date().toLocaleDateString(),
+          };
+
+          let emailResult;
+          switch (partner.role) {
+            case 'vendor':
+              emailResult = await this.emailService.sendNewOrderEmail(
+                partner.email,
+                partner.fullName || partner.businessName || 'Vendor',
+                orderId,
+                orderDataForPartner
+              );
+              break;
+            case 'retailer':
+              emailResult = await this.emailService.sendRetailerNewOrderEmail(
+                partner.email,
+                partner.fullName || partner.businessName || 'Retailer',
+                orderId,
+                orderDataForPartner
+              );
+              break;
+            case 'manufacturer':
+              emailResult = await this.emailService.sendManufacturerNewOrderEmail(
+                partner.email,
+                partner.fullName || partner.businessName || 'Manufacturer',
+                orderId,
+                orderDataForPartner
+              );
+              break;
+            default:
+              console.log(`⚠️ [ORDER] Unknown partner role: ${partner.role}`);
+              continue;
+          }
+
+          if (emailResult?.success) {
+            console.log(`✅ [ORDER] ${partner.role} notification sent to ${partner.email} (ID: ${emailResult.messageId})`);
+          } else {
+            console.error(`❌ [ORDER] ${partner.role} notification failed to ${partner.email}:`, emailResult?.error);
+          }
+        } catch (error) {
+          console.error(`❌ [ORDER] Error sending notification to ${partner.email}:`, error);
+        }
+      }
+
+      console.log('📧 [ORDER] Partner notifications completed');
+    } catch (error) {
+      console.error('❌ [ORDER] Error in sendOrderNotificationsToPartners:', error);
+      // Don't fail order creation if partner notifications fail
+    }
   }
 }

@@ -12,7 +12,7 @@ export interface BaseTemplateProps {
     url: string;
     style?: 'primary' | 'secondary' | 'success' | 'warning' | 'danger';
   };
-  variables: {
+  variables?: {
     company_name?: string;
     support_email?: string;
     base_url?: string;
@@ -31,10 +31,11 @@ export const generateBaseEmailHTML = ({
   showFooter = true,
   additionalStyles = ''
 }: BaseTemplateProps): string => {
-  const logoUrl = variables.logo_url || 'https://via.placeholder.com/200x60/252849/ffffff?text=Urembo+Hub';
-  const supportEmail = variables.support_email || 'support@urembohub.com';
-  const baseUrl = variables.base_url || 'https://urembohub.com';
-  const companyName = variables.company_name || 'Urembo Hub';
+  const baseApiUrl = process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000';
+  const logoUrl = variables?.logo_url || `${baseApiUrl}/uploads/assets/logo.png`;
+  const supportEmail = variables?.support_email || 'support@urembohub.com';
+  const baseUrl = variables?.base_url || 'https://urembohub.com';
+  const companyName = variables?.company_name || 'Urembo Hub';
 
   return `
 <!DOCTYPE html>

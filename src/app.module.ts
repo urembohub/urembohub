@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -27,12 +28,14 @@ import { PasswordResetModule } from './auth/password-reset.module';
 import { AdminModule } from './admin/admin.module';
 import { StaffAssignmentsModule } from './staff-assignments/staff-assignments.module';
 import { UploadModule } from './upload/upload.module';
+import { PaystackModule } from './paystack/paystack.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
     OnboardingModule,
@@ -58,6 +61,7 @@ import { UploadModule } from './upload/upload.module';
     AdminModule,
     StaffAssignmentsModule,
     UploadModule,
+    PaystackModule,
   ],
   controllers: [AppController],
   providers: [AppService],

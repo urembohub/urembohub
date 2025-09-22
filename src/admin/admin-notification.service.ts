@@ -32,21 +32,39 @@ export class AdminNotificationService {
 
   async notifyAdminsOfSignup(userData: any): Promise<void> {
     try {
+      console.log('👨‍💼 [ADMIN] Starting admin signup notification process...');
       const adminEmails = await this.getAdminEmails();
       
       if (adminEmails.length === 0) {
+        console.warn('⚠️ [ADMIN] No admin emails found for signup notification');
         this.logger.warn('No admin emails found for signup notification');
         return;
       }
 
-      // Send notification to all admins
-      const promises = adminEmails.map(adminEmail => 
-        this.emailService.sendAdminSignupNotificationEmail(adminEmail, userData)
-      );
+      console.log('👨‍💼 [ADMIN] Found admin emails:', adminEmails);
+      console.log('👨‍💼 [ADMIN] Sending notifications to admins for user:', userData.email);
 
-      await Promise.all(promises);
+      // Send notification to all admins
+      const promises = adminEmails.map(async (adminEmail, index) => {
+        console.log(`📧 [ADMIN] Sending notification ${index + 1}/${adminEmails.length} to: ${adminEmail}`);
+        const result = await this.emailService.sendAdminSignupNotificationEmail(adminEmail, userData);
+        
+        if (result.success) {
+          console.log(`✅ [ADMIN] Notification sent successfully to ${adminEmail} (ID: ${result.messageId})`);
+        } else {
+          console.error(`❌ [ADMIN] Notification failed to ${adminEmail}:`, result.error);
+        }
+        
+        return result;
+      });
+
+      const results = await Promise.all(promises);
+      const successCount = results.filter(r => r.success).length;
+      
+      console.log(`📊 [ADMIN] Admin notification summary: ${successCount}/${adminEmails.length} successful`);
       this.logger.log(`Signup notification sent to ${adminEmails.length} admins for user: ${userData.email}`);
     } catch (error) {
+      console.error('❌ [ADMIN] Error sending signup notification to admins:', error);
       this.logger.error('Error sending signup notification to admins:', error);
     }
   }
@@ -116,17 +134,31 @@ export class AdminNotificationService {
 
   async notifyPartnerSignup(partnerData: any): Promise<void> {
     try {
+      console.log('🤝 [PARTNER] Starting partner signup notification process...');
+      console.log('🤝 [PARTNER] Partner data:', partnerData);
+      
       // Notify admins
+      console.log('🤝 [PARTNER] Step 1: Notifying admins...');
       await this.notifyAdminsOfSignup(partnerData);
 
       // Notify partner
-      await this.emailService.sendPartnerSignupNotificationEmail(
+      console.log('🤝 [PARTNER] Step 2: Notifying partner...');
+      const partnerEmailResult = await this.emailService.sendPartnerSignupNotificationEmail(
         partnerData.email,
         partnerData.fullName || 'Partner'
       );
 
+      if (partnerEmailResult.success) {
+        console.log('✅ [PARTNER] Partner notification sent successfully!');
+        console.log('📧 [PARTNER] Message ID:', partnerEmailResult.messageId);
+      } else {
+        console.error('❌ [PARTNER] Partner notification failed:', partnerEmailResult.error);
+      }
+
+      console.log('🎉 [PARTNER] Partner signup notification process completed!');
       this.logger.log(`Partner signup notifications sent for: ${partnerData.email}`);
     } catch (error) {
+      console.error('❌ [PARTNER] Error sending partner signup notifications:', error);
       this.logger.error('Error sending partner signup notifications:', error);
     }
   }
@@ -143,6 +175,45 @@ export class AdminNotificationService {
       this.logger.log(`Partner approval notification sent to: ${partnerData.email}, approved: ${approved}`);
     } catch (error) {
       this.logger.error('Error sending partner approval notification:', error);
+    }
+  }
+
+  async notifyAdminsOfOnboardingSubmission(submissionData: any): Promise<void> {
+    try {
+      console.log('👨‍💼 [ADMIN] Starting onboarding submission notification process...');
+      const adminEmails = await this.getAdminEmails();
+      
+      if (adminEmails.length === 0) {
+        console.warn('⚠️ [ADMIN] No admin emails found for onboarding submission notification');
+        this.logger.warn('No admin emails found for onboarding submission notification');
+        return;
+      }
+
+      console.log('👨‍💼 [ADMIN] Found admin emails:', adminEmails);
+      console.log('👨‍💼 [ADMIN] Sending onboarding submission notifications for:', submissionData.email);
+
+      // Send notification to all admins
+      const promises = adminEmails.map(async (adminEmail, index) => {
+        console.log(`📧 [ADMIN] Sending onboarding notification ${index + 1}/${adminEmails.length} to: ${adminEmail}`);
+        const result = await this.emailService.sendAdminOnboardingSubmissionEmail(adminEmail, submissionData);
+        
+        if (result.success) {
+          console.log(`✅ [ADMIN] Onboarding notification sent successfully to ${adminEmail} (ID: ${result.messageId})`);
+        } else {
+          console.error(`❌ [ADMIN] Onboarding notification failed to ${adminEmail}:`, result.error);
+        }
+        
+        return result;
+      });
+
+      const results = await Promise.all(promises);
+      const successCount = results.filter(r => r.success).length;
+      
+      console.log(`📊 [ADMIN] Onboarding notification summary: ${successCount}/${adminEmails.length} successful`);
+      this.logger.log(`Onboarding submission notification sent to ${adminEmails.length} admins for user: ${submissionData.email}`);
+    } catch (error) {
+      console.error('❌ [ADMIN] Error sending onboarding submission notification to admins:', error);
+      this.logger.error('Error sending onboarding submission notification to admins:', error);
     }
   }
 }

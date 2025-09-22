@@ -127,9 +127,79 @@ export class UsersService {
   }
 
   async deleteUser(id: string) {
-    return this.prisma.profile.delete({
-      where: { id },
-    });
+    try {
+      console.log('🗑️ [USER_DELETE] Starting user deletion process for user:', id);
+      
+      // First, check if user exists
+      const user = await this.prisma.profile.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          email: true,
+          fullName: true,
+          role: true,
+          businessName: true
+        }
+      });
+
+      if (!user) {
+        console.log('⚠️ [USER_DELETE] User not found:', id);
+        throw new NotFoundException('User not found');
+      }
+
+      console.log('👤 [USER_DELETE] User found:', {
+        id: user.id,
+        email: user.email,
+        name: user.fullName || user.businessName,
+        role: user.role
+      });
+
+      // Count related data before deletion
+      const [productCount, serviceCount, orderCount] = await Promise.all([
+        this.prisma.product.count({ where: { retailerId: id } }),
+        this.prisma.service.count({ where: { vendorId: id } }),
+        this.prisma.order.count({ where: { userId: id } })
+      ]);
+
+      console.log('📊 [USER_DELETE] Related data counts:');
+      console.log(`  - Products: ${productCount}`);
+      console.log(`  - Services: ${serviceCount}`);
+      console.log(`  - Orders: ${orderCount}`);
+
+      // Delete user (cascading deletes will handle products, services, etc.)
+      const deletedUser = await this.prisma.profile.delete({
+        where: { id },
+      });
+
+      console.log('✅ [USER_DELETE] User and all related data deleted successfully');
+      console.log('🗑️ [USER_DELETE] Cascading deletes handled:');
+      console.log(`  - ${productCount} products deleted`);
+      console.log(`  - ${serviceCount} services deleted`);
+      console.log(`  - All related orders, appointments, reviews, etc. deleted`);
+
+      return {
+        success: true,
+        message: 'User and all related data deleted successfully',
+        deletedUser: {
+          id: deletedUser.id,
+          email: deletedUser.email,
+          name: deletedUser.fullName || deletedUser.businessName
+        },
+        deletedData: {
+          products: productCount,
+          services: serviceCount,
+          orders: orderCount
+        }
+      };
+    } catch (error) {
+      console.error('❌ [USER_DELETE] Error deleting user:', error);
+      
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      
+      throw new Error(`Failed to delete user: ${error.message}`);
+    }
   }
 
   async createUser(createData: CreateUserDto) {

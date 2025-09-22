@@ -97,6 +97,7 @@ export class OnboardingController {
     return this.onboardingService.getSubmissionById(id);
   }
 
+
   @UseGuards(JwtAuthGuard)
   @Get('submissions/user/:userId')
   async getUserSubmissions(@Param('userId', ParseUUIDPipe) userId: string, @Request() req) {

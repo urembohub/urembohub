@@ -2,7 +2,7 @@
  * Backend Email Testing Script
  * 
  * This script tests all available email templates by sending test emails
- * to pablocasso20@gmail.com for verification.
+ * to benardogutu65@gmail.com for verification.
  * 
  * Run with: npm run test:emails
  */
@@ -12,7 +12,7 @@ import { AppModule } from '../app.module';
 import { EmailService } from '../email/email.service';
 
 // Test configuration
-const TEST_EMAIL = 'pablocasso20@gmail.com';
+const TEST_EMAIL = 'benardogutu65@gmail.com';
 const TEST_USER_NAME = 'Pablo Casso';
 
 // Test data generators
