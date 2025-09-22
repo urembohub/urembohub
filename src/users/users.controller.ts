@@ -104,9 +104,16 @@ export class UsersController {
   @Patch(':id/onboarding-status')
   async updateOnboardingStatus(
     @Param('id') id: string,
-    @Body() body: UpdateOnboardingStatusDto
+    @Body() body: UpdateOnboardingStatusDto,
+    @Request() req
   ) {
-    return this.usersService.updateOnboardingStatus(id, body.status);
+    return this.usersService.updateOnboardingStatus(
+      id, 
+      body.status, 
+      req.user.sub, 
+      body.notes, 
+      body.rejectionReason
+    );
   }
 
   @Put(':id/payment-details')

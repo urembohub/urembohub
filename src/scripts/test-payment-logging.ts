@@ -273,3 +273,4 @@ async function testPaymentLogging() {
 }
 
 testPaymentLogging();
+

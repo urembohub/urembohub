@@ -3,11 +3,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import { user_role, onboarding_status } from '@prisma/client';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { OnboardingService } from '../onboarding/onboarding.service';
 import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private onboardingService: OnboardingService
+  ) {}
 
   async findById(id: string) {
     const user = await this.prisma.profile.findUnique({
@@ -268,17 +272,17 @@ export class UsersService {
     });
   }
 
-  async updateOnboardingStatus(id: string, status: onboarding_status) {
-    if (status === onboarding_status.approved) {
-      return this.prisma.profile.update({
-        where: { id },
-        data: { isVerified: true, onboardingStatus: status   },
-      });
-    }
-    return this.prisma.profile.update({
-      where: { id },
-      data: { onboardingStatus: status },
-    });
+  async updateOnboardingStatus(id: string, status: onboarding_status, adminId?: string, notes?: string, rejectionReason?: string) {
+    // Use the onboarding service which handles email notifications
+    const result = await this.onboardingService.updateUserOnboardingStatus(
+      id, 
+      status, 
+      adminId || 'system', 
+      notes, 
+      rejectionReason
+    );
+    
+    return result.user;
   }
 
   async updatePaymentDetails(id: string, paymentAccountDetails: any, paymentAccountType: string) {

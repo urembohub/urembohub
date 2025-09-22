@@ -101,3 +101,4 @@ USING (
     WHERE vendor_id = auth.uid() OR customer_id = auth.uid()
   )
 );
+
