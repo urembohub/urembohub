@@ -8,7 +8,8 @@ import {
   Param, 
   Query, 
   UseGuards, 
-  Request 
+  Request,
+  Req
 } from '@nestjs/common';
 import { OrdersService, CreateOrderDto, UpdateOrderDto } from './orders.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -115,15 +116,33 @@ export class OrdersController {
   @Get('retailer/:retailerId/order-items')
   async getOrderItemsByRetailerId(
     @Param('retailerId') retailerId: string,
+    @Req() req: any,
   ) {
-    return this.ordersService.getOrderItemsByRetailerId(retailerId);
+    try {
+      // Ensure user can only access their own data or is admin
+      const userId = req.user.sub || req.user.id;
+      if (userId !== retailerId && req.user.role !== 'admin') {
+        throw new Error('Access denied: You can only access your own order items');
+      }
+      
+      return this.ordersService.getOrderItemsByRetailerId(retailerId);
+    } catch (error) {
+      console.error('Error in getOrderItemsByRetailerId:', error);
+      throw error;
+    }
   }
 
   @UseGuards(JwtAuthGuard)
   @Get('vendor/:vendorId/service-appointments')
   async getServiceAppointmentsByVendorId(
     @Param('vendorId') vendorId: string,
+    @Req() req: any,
   ) {
+    // Ensure user can only access their own data or is admin
+    const userId = req.user.sub || req.user.id;
+    if (userId !== vendorId && req.user.role !== 'admin') {
+      throw new Error('Access denied: You can only access your own service appointments');
+    }
     return this.ordersService.getServiceAppointmentsByVendorId(vendorId);
   }
 }

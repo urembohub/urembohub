@@ -592,11 +592,21 @@ export class OnboardingService {
     try {
       if (status === onboarding_status.approved) {
         console.log('📧 [ONBOARDING] Sending profile approved email...');
-        await this.emailService.sendProfileApprovedEmail(
+        console.log('📧 [ONBOARDING] User email:', user.email);
+        console.log('📧 [ONBOARDING] User name:', user.fullName || 'User');
+        
+        const emailResult = await this.emailService.sendProfileApprovedEmail(
           user.email,
           user.fullName || 'User'
         );
-        console.log('✅ [ONBOARDING] Profile approved email sent successfully!');
+        
+        console.log('📧 [ONBOARDING] Email result:', emailResult);
+        
+        if (emailResult.success) {
+          console.log('✅ [ONBOARDING] Profile approved email sent successfully!');
+        } else {
+          console.log('❌ [ONBOARDING] Email failed:', emailResult.error);
+        }
       } else if (status === onboarding_status.rejected) {
         console.log('📧 [ONBOARDING] Sending profile rejected email...');
         await this.emailService.sendProfileRejectedEmail(

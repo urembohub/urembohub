@@ -491,7 +491,8 @@ export class AnalyticsService {
       weekAgo,
       monthAgo,
       orders: userId && userRole === 'retailer' ? { ...baseWhere, retailerId: userId } : baseWhere,
-      products: userId && (userRole === 'retailer' || userRole === 'manufacturer') ? { ...baseWhere, vendorId: userId } : baseWhere,
+      products: userId && userRole === 'retailer' ? { ...baseWhere, retailerId: userId } : 
+                userId && userRole === 'manufacturer' ? { ...baseWhere, manufacturerId: userId } : baseWhere,
       services: userId && userRole === 'vendor' ? { ...baseWhere, vendorId: userId } : baseWhere,
       users: baseWhere,
       tickets: userId ? { ...baseWhere, createdBy: userId } : baseWhere,

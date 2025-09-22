@@ -52,17 +52,28 @@ export class OrdersService {
   async createOrder(userId: string | null, createOrderDto: CreateOrderDto) {
     const { cartItems, ...orderData } = createOrderDto;
 
+    // Extract retailerId and vendorId from cart items
+    const productItems = cartItems.filter(item => item.type === 'product');
+    const serviceItems = cartItems.filter(item => item.type === 'service');
+    
+    // Get retailerId from first product item (assuming single retailer per order)
+    const retailerId = productItems.length > 0 ? 
+      await this.getRetailerIdFromProduct(productItems[0].id) : null;
+    
+    // Get vendorId from first service item (assuming single vendor per order)
+    const vendorId = serviceItems.length > 0 ? serviceItems[0].vendorId : null;
+
     // Create the order
     const order = await this.prisma.order.create({
       data: {
         ...orderData,
         userId,
+        retailerId,
+        vendorId,
       },
     });
 
-    // Process cart items
-    const productItems = cartItems.filter(item => item.type === 'product');
-    const serviceItems = cartItems.filter(item => item.type === 'service');
+    // Process cart items (already filtered above)
 
     // Create order items for products
     if (productItems.length > 0) {
@@ -581,31 +592,48 @@ export class OrdersService {
   async getOrderItemsByRetailerId(retailerId: string) {
     return this.prisma.orderItem.findMany({
       where: {
-        product: {
-          retailerId: retailerId,
-        },
         order: {
-          statusEnhanced: 'completed',
-        },
+          retailerId: retailerId,
+          paymentReference: { not: null },
+          paymentStatus: 'paid'
+        }
       },
       include: {
+        order: {
+          select: {
+            id: true,
+            status: true,
+            totalAmount: true,
+            createdAt: true,
+            customerEmail: true,
+            customerPhone: true,
+            shippingAddress: true,
+            paymentStatus: true,
+            paymentReference: true,
+            paystackReference: true,
+            user: {
+              select: {
+                id: true,
+                fullName: true,
+                email: true
+              }
+            }
+          }
+        },
         product: {
           select: {
             id: true,
             name: true,
-            price: true,
-          },
-        },
-        order: {
-          select: {
-            createdAt: true,
-            clientId: true,
-          },
-        },
+            imageUrl: true,
+            retailerId: true
+          }
+        }
       },
       orderBy: {
-        createdAt: 'desc',
-      },
+        order: {
+          createdAt: 'desc'
+        }
+      }
     });
   }
 
@@ -726,6 +754,22 @@ export class OrdersService {
     } catch (error) {
       console.error('❌ [ORDER] Error in sendOrderNotificationsToPartners:', error);
       // Don't fail order creation if partner notifications fail
+    }
+  }
+
+  /**
+   * Get retailerId from product
+   */
+  private async getRetailerIdFromProduct(productId: string): Promise<string | null> {
+    try {
+      const product = await this.prisma.product.findUnique({
+        where: { id: productId },
+        select: { retailerId: true }
+      });
+      return product?.retailerId || null;
+    } catch (error) {
+      console.error('❌ [ORDER] Error getting retailerId from product:', error);
+      return null;
     }
   }
 }
