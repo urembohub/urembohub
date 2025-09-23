@@ -3,6 +3,7 @@ import {
   Get, 
   Post, 
   Put, 
+  Patch,
   Delete, 
   Body, 
   Param, 
@@ -66,6 +67,17 @@ export class LiveShoppingController {
     @Request() req
   ) {
     return this.liveShoppingService.updateSession(id, updateSessionDto, req.user.sub, req.user.role);
+  }
+
+  // Update session status (for live streaming)
+  @Patch('sessions/:id/status')
+  @UseGuards(JwtAuthGuard)
+  async updateSessionStatus(
+    @Param('id') id: string,
+    @Body() body: { status: string; streamUrl?: string },
+    @Request() req
+  ) {
+    return this.liveShoppingService.updateSessionStatus(id, body.status, body.streamUrl, req.user.sub);
   }
 
   // Delete live shopping session

@@ -1072,6 +1072,8 @@ model LiveShoppingSession {
   vendorId          String    @map("vendor_id")
   retailerId        String?   @map("retailer_id")
   scheduledAt       DateTime  @map("scheduled_at")
+  scheduledStart    DateTime? @map("scheduled_start")
+  scheduledEnd      DateTime? @map("scheduled_end")
   startedAt         DateTime? @map("started_at")
   endedAt           DateTime? @map("ended_at")
   actualStart       DateTime? @map("actual_start")
@@ -1079,8 +1081,14 @@ model LiveShoppingSession {
   status            String    @default("scheduled") // scheduled, live, ended, cancelled
   thumbnailUrl      String?   @map("thumbnail_url")
   streamUrl         String?   @map("stream_url")
+  agoraChannelName  String?   @map("agora_channel_name")
   viewerCount       Int       @default(0) @map("viewer_count")
   isActive          Boolean   @default(true) @map("is_active")
+  tags              String[]  @default([])
+  metadata          Json?
+  category          String?
+  language          String?   @default("en")
+  timezone          String?   @default("UTC")
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 

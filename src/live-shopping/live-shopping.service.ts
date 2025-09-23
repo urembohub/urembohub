@@ -174,15 +174,16 @@ export class LiveShoppingService {
         vendorId: retailerId,
         retailerId,
         scheduledAt: scheduledStart ? new Date(scheduledStart) : new Date(),
-        // scheduledEnd: scheduledEnd ? new Date(scheduledEnd) : null, // This field doesn't exist in schema
+        scheduledStart: scheduledStart ? new Date(scheduledStart) : null,
+        scheduledEnd: scheduledEnd ? new Date(scheduledEnd) : null,
         status,
         streamUrl,
         thumbnailUrl,
-        // tags, // This field doesn't exist in the schema
-        // metadata, // This field doesn't exist in the schema
-        // category, // This field doesn't exist in the schema
-        // language, // This field doesn't exist in the schema
-        // timezone, // This field doesn't exist in the schema
+        tags,
+        metadata,
+        category,
+        language,
+        timezone,
       },
       include: {
         retailer: {
@@ -236,6 +237,44 @@ export class LiveShoppingService {
                 stockQuantity: true,
               },
             },
+          },
+        },
+      },
+    });
+
+    return updatedSession;
+  }
+
+  // Update session status (for live streaming)
+  async updateSessionStatus(id: string, status: string, streamUrl?: string, userId?: string) {
+    const session = await this.getSessionById(id);
+
+    // Check permissions if userId is provided
+    if (userId && session.retailerId !== userId) {
+      throw new ForbiddenException('You can only update your own sessions');
+    }
+
+    const updateData: any = { status };
+    
+    if (status === 'live') {
+      updateData.actualStart = new Date();
+      if (streamUrl) {
+        updateData.streamUrl = streamUrl;
+      }
+    } else if (status === 'ended') {
+      updateData.actualEnd = new Date();
+    }
+
+    const updatedSession = await this.prisma.liveShoppingSession.update({
+      where: { id },
+      data: updateData,
+      include: {
+        retailer: {
+          select: {
+            id: true,
+            fullName: true,
+            businessName: true,
+            email: true,
           },
         },
       },

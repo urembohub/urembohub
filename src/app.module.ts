@@ -29,6 +29,7 @@ import { AdminModule } from './admin/admin.module';
 import { StaffAssignmentsModule } from './staff-assignments/staff-assignments.module';
 import { UploadModule } from './upload/upload.module';
 import { PaystackModule } from './paystack/paystack.module';
+import { AgoraModule } from './agora/agora.module';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { PaystackModule } from './paystack/paystack.module';
     StaffAssignmentsModule,
     UploadModule,
     PaystackModule,
+    AgoraModule,
   ],
   controllers: [AppController],
   providers: [AppService],
