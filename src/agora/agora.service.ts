@@ -1,11 +1,6 @@
-import {
-  Injectable,
-  BadRequestException,
-  NotFoundException,
-} from "@nestjs/common"
-import { ConfigService } from "@nestjs/config"
-import { PrismaService } from "../prisma/prisma.service"
-const { RtcTokenBuilder, RtcRole } = require("agora-token")
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class AgoraService {
@@ -17,11 +12,7 @@ export class AgoraService {
   /**
    * Generate Agora token for live streaming
    */
-  async generateToken(
-    sessionId: string,
-    userId: string,
-    role: "host" | "audience" = "audience"
-  ) {
+  async generateToken(sessionId: string, userId: string, role: 'host' | 'audience' = 'audience') {
     // Verify session exists
     const session = await this.prisma.liveShoppingSession.findUnique({
       where: { id: sessionId },
@@ -35,74 +26,54 @@ export class AgoraService {
           },
         },
       },
-    })
+    });
 
     if (!session) {
-      throw new NotFoundException("Live session not found")
+      throw new NotFoundException('Live session not found');
     }
 
     // Check if session is active
-    if (session.status === "ended" || session.status === "cancelled") {
-      throw new BadRequestException("Session is no longer active")
+    if (session.status === 'ended' || session.status === 'cancelled') {
+      throw new BadRequestException('Session is no longer active');
     }
 
     // Determine if user is host
-    const isHost = session.retailerId === userId
-    const actualRole = isHost ? "host" : role
+    const isHost = session.retailerId === userId;
+    const actualRole = isHost ? 'host' : role;
 
     // Generate or get channel name
-    let channelName = session.agoraChannelName
+    let channelName = session.agoraChannelName;
     if (!channelName) {
-      channelName = `live_session_${sessionId}`
+      channelName = `live_session_${sessionId}`;
       await this.prisma.liveShoppingSession.update({
         where: { id: sessionId },
         data: { agoraChannelName: channelName },
-      })
+      });
     }
 
     // Get Agora credentials
-    const AGORA_APP_ID = this.configService.get<string>("AGORA_APP_ID")
-    const AGORA_APP_CERTIFICATE = this.configService.get<string>(
-      "AGORA_APP_CERTIFICATE"
-    )
+    const AGORA_APP_ID = this.configService.get<string>('AGORA_APP_ID');
+    const AGORA_APP_CERTIFICATE = this.configService.get<string>('AGORA_APP_CERTIFICATE');
 
     if (!AGORA_APP_ID || !AGORA_APP_CERTIFICATE) {
-      throw new BadRequestException(
-        "Agora credentials not configured. Please set AGORA_APP_ID and AGORA_APP_CERTIFICATE environment variables."
-      )
+      throw new BadRequestException('Agora credentials not configured. Please set AGORA_APP_ID and AGORA_APP_CERTIFICATE environment variables.');
     }
 
-    // Use UID 0 for agora-rtc-react compatibility
-    const uid = 0
+    // Generate unique UID for user
+    const uid = this.generateUid(userId);
 
-    // Generate proper Agora token
-    console.log("Generating token with:", {
-      appId: AGORA_APP_ID,
-      appCert: AGORA_APP_CERTIFICATE ? "SET" : "NOT SET",
-      channelName,
-      uid,
-      role: actualRole === "host" ? "PUBLISHER" : "SUBSCRIBER",
-    })
-
-    // Generate proper Agora token with new credentials
-    const token = this.generateAgoraToken(
+    // Generate token (simplified for development)
+    const token = this.createSimpleToken(
       AGORA_APP_ID,
-      AGORA_APP_CERTIFICATE,
       channelName,
       uid,
-      actualRole === "host" ? RtcRole.PUBLISHER : RtcRole.SUBSCRIBER,
-      3600 // 1 hour
-    )
-
-    console.log("Generated token:", {
-      length: token.length,
-      prefix: token.substring(0, 20) + "...",
-      isValid: token.startsWith("007"),
-    })
+      actualRole === 'host' ? 1 : 2, // 1 = host, 2 = audience
+      24 * 3600 // 24 hours
+    );
 
     // Track participant (only audience, not host)
     if (!isHost) {
-      await this.trackParticipant(sessionId, userId, role)
+      await this.trackParticipant(sessionId, userId, role);
     }
 
     return {
@@ -110,7 +81,7 @@ export class AgoraService {
       appId: AGORA_APP_ID,
       channelName,
       uid,
-      role: actualRole === "host" ? 1 : 2,
+      role: actualRole === 'host' ? 1 : 2,
       isHost,
       session: {
         id: session.id,
@@ -118,17 +89,13 @@ export class AgoraService {
         status: session.status,
         retailer: session.retailer,
       },
-    }
+    };
   }
 
   /**
    * Track participant joining session
    */
-  private async trackParticipant(
-    sessionId: string,
-    userId: string,
-    role: string
-  ) {
+  private async trackParticipant(sessionId: string, userId: string, role: string) {
     await this.prisma.liveSessionParticipant.upsert({
       where: {
         sessionId_userId: {
@@ -149,7 +116,7 @@ export class AgoraService {
         isActive: true,
         lastSeenAt: new Date(),
       },
-    })
+    });
   }
 
   /**
@@ -166,22 +133,22 @@ export class AgoraService {
         leftAt: new Date(),
         lastSeenAt: new Date(),
       },
-    })
+    });
   }
 
   /**
    * Get session participants count
    */
   async getSessionParticipantsCount(sessionId: string): Promise<number> {
-    console.log("Getting participant count for session:", sessionId)
+    console.log('Getting participant count for session:', sessionId);
     const count = await this.prisma.liveSessionParticipant.count({
       where: {
         sessionId,
         isActive: true,
       },
-    })
-    console.log("Participant count result:", count)
-    return count
+    });
+    console.log('Participant count result:', count);
+    return count;
   }
 
   /**
@@ -189,51 +156,37 @@ export class AgoraService {
    */
   private generateUid(userId: string): number {
     // Convert UUID to a positive integer
-    const hash = userId.replace(/-/g, "")
-    return parseInt(hash.substring(0, 8), 16)
+    const hash = userId.replace(/-/g, '');
+    return parseInt(hash.substring(0, 8), 16);
   }
 
   /**
-   * Generate proper Agora token using official library
+   * Create simple token for development
+   * In production, use the official Agora token generation library
    */
-  private generateAgoraToken(
+  private createSimpleToken(
     appId: string,
-    appCertificate: string,
     channelName: string,
     uid: number,
     role: number,
     expireTime: number
   ): string {
-    const currentTimestamp = Math.floor(Date.now() / 1000)
-    const privilegeExpiredTs = currentTimestamp + expireTime
-
-    try {
-      const token = RtcTokenBuilder.buildTokenWithUid(
-        appId,
-        appCertificate,
-        channelName,
-        uid,
-        role,
-        privilegeExpiredTs
-      )
-
-      console.log("Token generation successful:", {
-        appId: appId.substring(0, 8) + "...",
-        channelName,
-        uid,
-        role,
-        expireTime,
-        tokenLength: token.length,
-        tokenPrefix: token.substring(0, 20) + "...",
-      })
-
-      return token
-    } catch (error) {
-      console.error("Token generation failed:", error)
-      throw new BadRequestException(
-        "Failed to generate Agora token: " + error.message
-      )
-    }
+    const now = Math.floor(Date.now() / 1000);
+    const privilegeExpireTime = now + expireTime;
+    
+    // Simple token structure for development
+    const tokenData = {
+      appId,
+      channelName,
+      uid,
+      role,
+      expireTime: privilegeExpireTime,
+      timestamp: now,
+    };
+    
+    // Base64 encode the token data
+    const token = Buffer.from(JSON.stringify(tokenData)).toString('base64');
+    return `006${token}`;
   }
 
   /**
@@ -243,25 +196,23 @@ export class AgoraService {
     // Verify session exists
     const session = await this.prisma.liveShoppingSession.findUnique({
       where: { id: sessionId },
-    })
+    });
 
     if (!session) {
-      throw new NotFoundException("Live session not found")
+      throw new NotFoundException('Live session not found');
     }
 
     // Check if session is active
-    if (session.status === "ended" || session.status === "cancelled") {
-      throw new BadRequestException("Session is no longer active")
+    if (session.status === 'ended' || session.status === 'cancelled') {
+      throw new BadRequestException('Session is no longer active');
     }
 
     // Get Agora credentials
-    const AGORA_APP_ID = this.configService.get<string>("AGORA_APP_ID")
-    const AGORA_APP_CERTIFICATE = this.configService.get<string>(
-      "AGORA_APP_CERTIFICATE"
-    )
+    const AGORA_APP_ID = this.configService.get<string>('AGORA_APP_ID');
+    const AGORA_APP_CERTIFICATE = this.configService.get<string>('AGORA_APP_CERTIFICATE');
 
     if (!AGORA_APP_ID || !AGORA_APP_CERTIFICATE) {
-      throw new BadRequestException("Agora credentials not configured")
+      throw new BadRequestException('Agora credentials not configured');
     }
 
     // Generate chat token (simplified for development)
@@ -269,14 +220,14 @@ export class AgoraService {
       AGORA_APP_ID,
       userId,
       24 * 3600 // 24 hours
-    )
+    );
 
     return {
       chatToken,
       appKey: AGORA_APP_ID,
       userId,
       sessionId,
-    }
+    };
   }
 
   /**
@@ -287,54 +238,50 @@ export class AgoraService {
     userId: string,
     expireTime: number
   ): string {
-    const now = Math.floor(Date.now() / 1000)
-    const privilegeExpireTime = now + expireTime
-
+    const now = Math.floor(Date.now() / 1000);
+    const privilegeExpireTime = now + expireTime;
+    
     // Simple chat token structure for development
     const tokenData = {
       appKey,
       userId,
       expireTime: privilegeExpireTime,
       timestamp: now,
-    }
-
+    };
+    
     // Base64 encode the token data
-    const token = Buffer.from(JSON.stringify(tokenData)).toString("base64")
-    return `chat_${token}`
+    const token = Buffer.from(JSON.stringify(tokenData)).toString('base64');
+    return `chat_${token}`;
   }
 
   /**
    * Update session status when stream starts/ends
    */
-  async updateSessionStatus(
-    sessionId: string,
-    status: "live" | "ended",
-    userId: string
-  ) {
+  async updateSessionStatus(sessionId: string, status: 'live' | 'ended', userId: string) {
     const session = await this.prisma.liveShoppingSession.findUnique({
       where: { id: sessionId },
-    })
+    });
 
     if (!session) {
-      throw new NotFoundException("Session not found")
+      throw new NotFoundException('Session not found');
     }
 
     // Check if user is the host
     if (session.retailerId !== userId) {
-      throw new BadRequestException("Only the host can update session status")
+      throw new BadRequestException('Only the host can update session status');
     }
 
-    const updateData: any = { status }
-
-    if (status === "live") {
-      updateData.actualStart = new Date()
-    } else if (status === "ended") {
-      updateData.actualEnd = new Date()
+    const updateData: any = { status };
+    
+    if (status === 'live') {
+      updateData.actualStart = new Date();
+    } else if (status === 'ended') {
+      updateData.actualEnd = new Date();
     }
 
     return this.prisma.liveShoppingSession.update({
       where: { id: sessionId },
       data: updateData,
-    })
+    });
   }
 }

@@ -187,10 +187,6 @@ model Profile {
   manufacturerOrders    ManufacturerOrder[]
   manufacturerOrdersAsManufacturer ManufacturerOrder[] @relation("ManufacturerOrderManufacturer")
   reviews               Review[]
-  vendorEscrows         ServiceEscrow[] @relation("VendorEscrows")
-  customerEscrows       ServiceEscrow[] @relation("CustomerEscrows")
-  createdEscrows        ServiceEscrow[] @relation("CreatedEscrows")
-  performedActions      EscrowAction[] @relation("PerformedActions")
 
   @@map("profiles")
 }
@@ -256,7 +252,6 @@ model Service {
   serviceSubcategory ServiceCategory? @relation("ServiceSubcategory", fields: [subcategoryId], references: [id])
   actualService     ServiceCategory? @relation("ServiceActual", fields: [actualServiceId], references: [id])
   wishlist          Wishlist[]
-  escrows           ServiceEscrow[]
 
   @@map("services")
 }
@@ -305,7 +300,6 @@ model Order {
   shipments         Shipment[]
   tickets           Ticket[]
   payments          Payment[]
-  escrows           ServiceEscrow[]
 
   @@map("orders")
 }
@@ -598,7 +592,6 @@ model RoleAuditLog {
 
   @@map("role_audit_logs")
 }
-
 model Shipment {
   id                    String          @id @default(uuid())
   orderId               String          @map("order_id")
@@ -1073,8 +1066,6 @@ model LiveShoppingSession {
   vendorId          String    @map("vendor_id")
   retailerId        String?   @map("retailer_id")
   scheduledAt       DateTime  @map("scheduled_at")
-  scheduledStart    DateTime? @map("scheduled_start")
-  scheduledEnd      DateTime? @map("scheduled_end")
   startedAt         DateTime? @map("started_at")
   endedAt           DateTime? @map("ended_at")
   actualStart       DateTime? @map("actual_start")
@@ -1082,14 +1073,8 @@ model LiveShoppingSession {
   status            String    @default("scheduled") // scheduled, live, ended, cancelled
   thumbnailUrl      String?   @map("thumbnail_url")
   streamUrl         String?   @map("stream_url")
-  agoraChannelName  String?   @map("agora_channel_name")
   viewerCount       Int       @default(0) @map("viewer_count")
   isActive          Boolean   @default(true) @map("is_active")
-  tags              String[]  @default([])
-  metadata          Json?
-  category          String?
-  language          String?   @default("en")
-  timezone          String?   @default("UTC")
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
@@ -1218,72 +1203,4 @@ model PaystackSplit {
   @@map("paystack_splits")
 }
 
-// Service Escrow System
-model ServiceEscrow {
-  id                String      @id @default(cuid())
-  orderId           String      @map("order_id")
-  serviceId         String      @map("service_id")
-  vendorId          String      @map("vendor_id")
-  customerId        String?     @map("customer_id")
-  amount            Decimal     @db.Decimal(10, 2)
-  currency          String      @default("KES")
-  status            EscrowStatus @default(pending)
-  paystackReference String?     @map("paystack_reference")
-  holdReference     String?     @map("hold_reference")
-  createdAt         DateTime    @default(now()) @map("created_at")
-  releasedAt        DateTime?   @map("released_at")
-  autoReleaseDate   DateTime    @map("auto_release_date")
-  disputeReason     String?     @map("dispute_reason")
-  adminNotes        String?     @map("admin_notes")
-  createdBy         String?     @map("created_by")
-  updatedAt         DateTime    @updatedAt @map("updated_at")
-
-  // Relations
-  order             Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  service           Service         @relation(fields: [serviceId], references: [id], onDelete: Cascade)
-  vendor            Profile         @relation("VendorEscrows", fields: [vendorId], references: [id], onDelete: Cascade)
-  customer          Profile?        @relation("CustomerEscrows", fields: [customerId], references: [id], onDelete: SetNull)
-  creator           Profile?        @relation("CreatedEscrows", fields: [createdBy], references: [id])
-  actions           EscrowAction[]
-
-  @@map("service_escrows")
-}
-
-model EscrowAction {
-  id          String      @id @default(cuid())
-  escrowId    String      @map("escrow_id")
-  actionType  ActionType  @map("action_type")
-  performedBy String?     @map("performed_by")
-  reason      String?
-  metadata    Json?
-  createdAt   DateTime    @default(now()) @map("created_at")
-
-  // Relations
-  escrow      ServiceEscrow @relation(fields: [escrowId], references: [id], onDelete: Cascade)
-  performer   Profile?      @relation("PerformedActions", fields: [performedBy], references: [id])
-
-  @@map("escrow_actions")
-}
-
-enum EscrowStatus {
-  pending
-  in_progress
-  completed
-  released
-  disputed
-  refunded
-  expired
-}
-
-enum ActionType {
-  created
-  service_started
-  service_completed
-  customer_approved
-  customer_disputed
-  admin_released
-  admin_refunded
-  auto_released
-  dispute_resolved
-}
 

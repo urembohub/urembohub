@@ -1,0 +1,55 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model chat_messages {
+  id              String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  chat_session_id String        @db.Uuid
+  user_id         String
+  username        String
+  user_role       String?
+  message         String
+  message_type    String?       @default("text")
+  metadata        Json?
+  created_at      DateTime?     @default(now()) @db.Timestamptz(6)
+  chat_sessions   chat_sessions @relation(fields: [chat_session_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([chat_session_id], map: "idx_chat_messages_chat_session_id")
+  @@index([created_at], map: "idx_chat_messages_created_at")
+}
+
+model chat_participants {
+  id              String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  chat_session_id String        @db.Uuid
+  user_id         String
+  username        String
+  user_role       String?
+  is_online       Boolean?      @default(false)
+  last_seen       DateTime?     @default(now()) @db.Timestamptz(6)
+  chat_sessions   chat_sessions @relation(fields: [chat_session_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([chat_session_id, user_id])
+  @@index([chat_session_id], map: "idx_chat_participants_chat_session_id")
+  @@index([user_id], map: "idx_chat_participants_user_id")
+}
+
+model chat_sessions {
+  id                String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  live_session_id   String
+  session_title     String?
+  retailer_id       String?
+  is_active         Boolean?            @default(true)
+  created_at        DateTime?           @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime?           @default(now()) @db.Timestamptz(6)
+  chat_messages     chat_messages[]
+  chat_participants chat_participants[]
+
+  @@index([is_active], map: "idx_chat_sessions_is_active")
+  @@index([live_session_id], map: "idx_chat_sessions_live_session_id")
+}
