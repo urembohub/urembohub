@@ -1,36 +1,44 @@
-import { IsString, IsNumber, IsOptional, IsBoolean, IsUUID, Min, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsNumber,
+  IsOptional,
+  IsBoolean,
+  IsUUID,
+  Min,
+  MaxLength,
+} from "class-validator"
 
 export class UpdateProductCategoryDto {
   @IsOptional()
   @IsString()
   @MaxLength(255)
-  name?: string;
+  name?: string
 
   @IsOptional()
   @IsString()
   @MaxLength(1000)
-  description?: string;
+  description?: string
 
   @IsOptional()
   @IsString()
   @MaxLength(500)
-  imageUrl?: string;
+  imageUrl?: string
 
   @IsOptional()
   @IsNumber()
   @Min(1)
-  level?: number;
+  level?: number
 
   @IsOptional()
-  @IsUUID()
-  parentId?: string;
+  @IsUUID(4, { message: "parentId must be a valid UUID" })
+  parentId?: string
 
   @IsOptional()
   @IsNumber()
   @Min(0)
-  position?: number;
+  position?: number
 
   @IsOptional()
   @IsBoolean()
-  isActive?: boolean;
+  isActive?: boolean
 }

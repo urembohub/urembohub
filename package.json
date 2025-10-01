@@ -66,6 +66,8 @@
     "@nestjs/platform-express": "^10.0.0",
     "@nestjs/schedule": "^6.0.1",
     "@prisma/client": "^6.15.0",
+    "@supabase/supabase-js": "^2.58.0",
+    "agora-token": "^2.0.5",
     "axios": "^1.12.1",
     "bcryptjs": "^2.4.3",
     "class-transformer": "^0.5.1",
