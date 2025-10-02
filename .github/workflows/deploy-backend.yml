@@ -40,9 +40,9 @@ jobs:
       - name: Deploy to Server
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
-          SERVER_USERNAME: ${{ secrets.SERVER_USERNAME }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${SERVER_USERNAME}@${SERVER_HOST} << 'ENDSSH'
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_HOST} << 'ENDSSH'
           cd ~/apps/backend
           git pull origin benard
           docker-compose down
