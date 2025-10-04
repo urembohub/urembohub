@@ -9,6 +9,24 @@ JWT_EXPIRES_IN="7d"
 PORT=3000
 NODE_ENV=development
 
+# API URL - Full base URL where your backend is hosted (without /api suffix)
+# Used for constructing absolute URLs (e.g., image URLs in emails, webhooks)
+# Development:
+API_URL=http://localhost:3000
+# Staging:
+# API_URL=https://api-staging.urembohub.com
+# Production:
+# API_URL=https://api.urembohub.com
+
+# Frontend URL - Where your frontend is hosted
+# Used for redirects and CORS
+# Development:
+FRONTEND_URL=http://localhost:5173
+# Staging:
+# FRONTEND_URL=https://staging.urembohub.com
+# Production:
+# FRONTEND_URL=https://urembohub.com
+
 # External Services
 PAYSTACK_SECRET_KEY="your-paystack-secret-key"
 PAYSTACK_PUBLIC_KEY="your-paystack-public-key"

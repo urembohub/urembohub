@@ -163,14 +163,13 @@ export class AgoraService {
    * Get session participants count
    */
   async getSessionParticipantsCount(sessionId: string): Promise<number> {
-    console.log('Getting participant count for session:', sessionId);
+    // Polling endpoint - logging disabled to reduce verbosity
     const count = await this.prisma.liveSessionParticipant.count({
       where: {
         sessionId,
         isActive: true,
       },
     });
-    console.log('Participant count result:', count);
     return count;
   }
 

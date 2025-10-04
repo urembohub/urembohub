@@ -3,9 +3,13 @@ import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
+import { UrlConfig } from './config/url.config';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  
+  // Validate URL configuration
+  UrlConfig.validateConfig();
   
   // Enable CORS
   app.enableCors({
@@ -31,7 +35,8 @@ async function bootstrap() {
   const port = process.env.PORT || 3000;
   await app.listen(port);
   
-  console.log(`🚀 Urembo Hub API is running on: http://localhost:${port}/api`);
+  const apiUrl = UrlConfig.getApiBaseUrl();
+  console.log(`🚀 Urembo Hub API is running on: ${apiUrl}/api`);
 }
 
 bootstrap();

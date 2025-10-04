@@ -3,6 +3,8 @@
  * Matches the frontend design system with HSL colors and modern styling
  */
 
+import { UrlConfig } from '../../config/url.config';
+
 export interface BaseTemplateProps {
   title: string;
   preheader?: string;
@@ -31,10 +33,10 @@ export const generateBaseEmailHTML = ({
   showFooter = true,
   additionalStyles = ''
 }: BaseTemplateProps): string => {
-  const baseApiUrl = process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000';
-  const logoUrl = variables?.logo_url || `${baseApiUrl}/uploads/assets/logo.png`;
+  const baseApiUrl = UrlConfig.getApiBaseUrl();
+  const logoUrl = variables?.logo_url || UrlConfig.getLogoUrl();
   const supportEmail = variables?.support_email || 'support@urembohub.com';
-  const baseUrl = variables?.base_url || 'https://urembohub.com';
+  const baseUrl = variables?.base_url || UrlConfig.getFrontendUrl();
   const companyName = variables?.company_name || 'Urembo Hub';
 
   return `
