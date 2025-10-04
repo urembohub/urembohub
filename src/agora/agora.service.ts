@@ -1,6 +1,8 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { RtcTokenBuilder, RtcRole } from 'agora-token';
+import { ChatTokenBuilder } from 'agora-token';
 
 @Injectable()
 export class AgoraService {
@@ -62,18 +64,39 @@ export class AgoraService {
     // Generate unique UID for user
     const uid = this.generateUid(userId);
 
-    // Generate token (simplified for development)
-    const token = this.createSimpleToken(
+    // Generate token using official Agora token builder (RtcTokenBuilder2)
+    const expirationTimeInSeconds = 24 * 3600; // 24 hours
+    
+    const userRole = actualRole === 'host' ? RtcRole.PUBLISHER : RtcRole.SUBSCRIBER;
+    
+    // buildTokenWithUid takes 7 parameters:
+    // appId, appCertificate, channelName, uid, role, tokenExpire, privilegeExpire
+    // tokenExpire: token validity in seconds (not absolute timestamp)
+    // privilegeExpire: privilege validity in seconds (not absolute timestamp)
+    const token = RtcTokenBuilder.buildTokenWithUid(
       AGORA_APP_ID,
+      AGORA_APP_CERTIFICATE,
       channelName,
       uid,
-      actualRole === 'host' ? 1 : 2, // 1 = host, 2 = audience
-      24 * 3600 // 24 hours
+      userRole,
+      expirationTimeInSeconds,  // Token expires in 24 hours
+      expirationTimeInSeconds   // Privileges expire in 24 hours
     );
+
+    console.log('Generated Agora token:', {
+      channelName,
+      uid,
+      role: userRole,
+      roleString: actualRole,
+      expiresIn: expirationTimeInSeconds + ' seconds',
+      tokenLength: token.length,
+      tokenPrefix: token.substring(0, 20) + '...',
+      appIdPrefix: AGORA_APP_ID.substring(0, 8) + '...',
+    });
 
     // Track participant (only audience, not host)
     if (!isHost) {
-      await this.trackParticipant(sessionId, userId, role);
+      await this.trackParticipant(sessionId, userId, actualRole);
     }
 
     return {
@@ -81,7 +104,7 @@ export class AgoraService {
       appId: AGORA_APP_ID,
       channelName,
       uid,
-      role: actualRole === 'host' ? 1 : 2,
+      role: userRole, // RtcRole.PUBLISHER or RtcRole.SUBSCRIBER
       isHost,
       session: {
         id: session.id,
@@ -160,34 +183,6 @@ export class AgoraService {
     return parseInt(hash.substring(0, 8), 16);
   }
 
-  /**
-   * Create simple token for development
-   * In production, use the official Agora token generation library
-   */
-  private createSimpleToken(
-    appId: string,
-    channelName: string,
-    uid: number,
-    role: number,
-    expireTime: number
-  ): string {
-    const now = Math.floor(Date.now() / 1000);
-    const privilegeExpireTime = now + expireTime;
-    
-    // Simple token structure for development
-    const tokenData = {
-      appId,
-      channelName,
-      uid,
-      role,
-      expireTime: privilegeExpireTime,
-      timestamp: now,
-    };
-    
-    // Base64 encode the token data
-    const token = Buffer.from(JSON.stringify(tokenData)).toString('base64');
-    return `006${token}`;
-  }
 
   /**
    * Generate Agora Chat token for live chat
@@ -215,11 +210,14 @@ export class AgoraService {
       throw new BadRequestException('Agora credentials not configured');
     }
 
-    // Generate chat token (simplified for development)
-    const chatToken = this.createSimpleChatToken(
+    // Generate chat token using official Agora ChatTokenBuilder
+    const expirationTimeInSeconds = 24 * 3600; // 24 hours
+    
+    const chatToken = ChatTokenBuilder.buildUserToken(
       AGORA_APP_ID,
+      AGORA_APP_CERTIFICATE,
       userId,
-      24 * 3600 // 24 hours
+      expirationTimeInSeconds
     );
 
     return {
@@ -228,30 +226,6 @@ export class AgoraService {
       userId,
       sessionId,
     };
-  }
-
-  /**
-   * Create simple chat token for development
-   */
-  private createSimpleChatToken(
-    appKey: string,
-    userId: string,
-    expireTime: number
-  ): string {
-    const now = Math.floor(Date.now() / 1000);
-    const privilegeExpireTime = now + expireTime;
-    
-    // Simple chat token structure for development
-    const tokenData = {
-      appKey,
-      userId,
-      expireTime: privilegeExpireTime,
-      timestamp: now,
-    };
-    
-    // Base64 encode the token data
-    const token = Buffer.from(JSON.stringify(tokenData)).toString('base64');
-    return `chat_${token}`;
   }
 
   /**
