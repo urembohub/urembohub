@@ -1,12 +1,18 @@
-import { 
-  Controller, 
-  Get, 
-  Query, 
-  UseGuards, 
-  Request 
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  Request,
 } from '@nestjs/common';
-import { AnalyticsService } from './analytics.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AnalyticsService } from './analytics.service';
 
 @Controller('analytics')
 export class AnalyticsController {
@@ -24,6 +30,25 @@ export class AnalyticsController {
     return this.analyticsService.getDashboardAnalytics(req.user.sub, req.user.role, dateRange);
   }
 
+  // ✅ NEW: Lightweight analytics for retailer dashboard (faster)
+  @Get('dashboard/light')
+  @UseGuards(JwtAuthGuard)
+  async getLightDashboardAnalytics(
+    @Request() req,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+  ) {
+    const dateRange = dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined;
+    return this.analyticsService.getLightDashboardAnalytics(req.user.sub, req.user.role, dateRange);
+  }
+
+  // ✅ NEW: Unified retailer dashboard endpoint
+  @Get('retailer/dashboard')
+  @UseGuards(JwtAuthGuard)
+  async getRetailerDashboard(@Request() req) {
+    return this.analyticsService.getRetailerDashboard(req.user.sub);
+  }
+
   // Get order analytics
   @Get('orders')
   @UseGuards(JwtAuthGuard)
@@ -33,8 +58,8 @@ export class AnalyticsController {
     @Query('dateTo') dateTo?: string,
   ) {
     const dateRange = dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined;
-    const analytics = await this.analyticsService.getDashboardAnalytics(req.user.sub, req.user.role, dateRange);
-    return analytics.orders;
+    const whereClause = this.analyticsService.buildWhereClause(req.user.sub, req.user.role, dateRange);
+    return this.analyticsService.getOrderAnalytics(whereClause);
   }
 
   // Get revenue analytics
@@ -46,8 +71,8 @@ export class AnalyticsController {
     @Query('dateTo') dateTo?: string,
   ) {
     const dateRange = dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined;
-    const analytics = await this.analyticsService.getDashboardAnalytics(req.user.sub, req.user.role, dateRange);
-    return analytics.revenue;
+    const whereClause = this.analyticsService.buildWhereClause(req.user.sub, req.user.role, dateRange);
+    return this.analyticsService.getRevenueAnalytics(whereClause);
   }
 
   // Get product analytics
@@ -59,8 +84,8 @@ export class AnalyticsController {
     @Query('dateTo') dateTo?: string,
   ) {
     const dateRange = dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined;
-    const analytics = await this.analyticsService.getDashboardAnalytics(req.user.sub, req.user.role, dateRange);
-    return analytics.products;
+    const whereClause = this.analyticsService.buildWhereClause(req.user.sub, req.user.role, dateRange);
+    return this.analyticsService.getProductAnalytics(whereClause);
   }
 
   // Get service analytics
@@ -72,8 +97,8 @@ export class AnalyticsController {
     @Query('dateTo') dateTo?: string,
   ) {
     const dateRange = dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined;
-    const analytics = await this.analyticsService.getDashboardAnalytics(req.user.sub, req.user.role, dateRange);
-    return analytics.services;
+    const whereClause = this.analyticsService.buildWhereClause(req.user.sub, req.user.role, dateRange);
+    return this.analyticsService.getServiceAnalytics(whereClause);
   }
 
   // Get user analytics
@@ -85,8 +110,8 @@ export class AnalyticsController {
     @Query('dateTo') dateTo?: string,
   ) {
     const dateRange = dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined;
-    const analytics = await this.analyticsService.getDashboardAnalytics(req.user.sub, req.user.role, dateRange);
-    return analytics.users;
+    const whereClause = this.analyticsService.buildWhereClause(req.user.sub, req.user.role, dateRange);
+    return this.analyticsService.getUserAnalytics(whereClause);
   }
 
   // Get payment analytics
@@ -98,8 +123,8 @@ export class AnalyticsController {
     @Query('dateTo') dateTo?: string,
   ) {
     const dateRange = dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined;
-    const analytics = await this.analyticsService.getDashboardAnalytics(req.user.sub, req.user.role, dateRange);
-    return analytics.payments;
+    const whereClause = this.analyticsService.buildWhereClause(req.user.sub, req.user.role, dateRange);
+    return this.analyticsService.getPaymentAnalytics(whereClause);
   }
 
   // Get ticket analytics
@@ -111,8 +136,8 @@ export class AnalyticsController {
     @Query('dateTo') dateTo?: string,
   ) {
     const dateRange = dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined;
-    const analytics = await this.analyticsService.getDashboardAnalytics(req.user.sub, req.user.role, dateRange);
-    return analytics.tickets;
+    const whereClause = this.analyticsService.buildWhereClause(req.user.sub, req.user.role, dateRange);
+    return this.analyticsService.getTicketAnalytics(whereClause);
   }
 
   // Get review analytics
@@ -124,8 +149,8 @@ export class AnalyticsController {
     @Query('dateTo') dateTo?: string,
   ) {
     const dateRange = dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined;
-    const analytics = await this.analyticsService.getDashboardAnalytics(req.user.sub, req.user.role, dateRange);
-    return analytics.reviews;
+    const whereClause = this.analyticsService.buildWhereClause(req.user.sub, req.user.role, dateRange);
+    return this.analyticsService.getReviewAnalytics(whereClause);
   }
 
   // Get live shopping analytics
@@ -137,8 +162,8 @@ export class AnalyticsController {
     @Query('dateTo') dateTo?: string,
   ) {
     const dateRange = dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined;
-    const analytics = await this.analyticsService.getDashboardAnalytics(req.user.sub, req.user.role, dateRange);
-    return analytics.liveShopping;
+    const whereClause = this.analyticsService.buildWhereClause(req.user.sub, req.user.role, dateRange);
+    return this.analyticsService.getLiveShoppingAnalytics(whereClause);
   }
 
   // Get manufacturer order analytics
@@ -150,8 +175,8 @@ export class AnalyticsController {
     @Query('dateTo') dateTo?: string,
   ) {
     const dateRange = dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined;
-    const analytics = await this.analyticsService.getDashboardAnalytics(req.user.sub, req.user.role, dateRange);
-    return analytics.manufacturerOrders;
+    const whereClause = this.analyticsService.buildWhereClause(req.user.sub, req.user.role, dateRange);
+    return this.analyticsService.getManufacturerOrderAnalytics(whereClause);
   }
 
   // Get onboarding analytics
@@ -163,20 +188,7 @@ export class AnalyticsController {
     @Query('dateTo') dateTo?: string,
   ) {
     const dateRange = dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined;
-    const analytics = await this.analyticsService.getDashboardAnalytics(req.user.sub, req.user.role, dateRange);
-    return analytics.onboarding;
-  }
-
-  // Get summary analytics
-  @Get('summary')
-  @UseGuards(JwtAuthGuard)
-  async getSummaryAnalytics(
-    @Request() req,
-    @Query('dateFrom') dateFrom?: string,
-    @Query('dateTo') dateTo?: string,
-  ) {
-    const dateRange = dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined;
-    const analytics = await this.analyticsService.getDashboardAnalytics(req.user.sub, req.user.role, dateRange);
-    return analytics.summary;
+    const whereClause = this.analyticsService.buildWhereClause(req.user.sub, req.user.role, dateRange);
+    return this.analyticsService.getOnboardingAnalytics(whereClause);
   }
 }

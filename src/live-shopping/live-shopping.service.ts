@@ -35,54 +35,160 @@ export class LiveShoppingService {
     if (retailerId) where.retailerId = retailerId
     if (category) where.category = category
 
-    const [sessions, total] = await Promise.all([
-      this.prisma.liveShoppingSession.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: "desc" },
-        include: {
-          retailer: {
-            select: {
-              id: true,
-              fullName: true,
-              businessName: true,
-              email: true,
+    try {
+      // ✅ OPTIMIZED: Get basic session data first (fast query)
+      const [sessions, total] = await Promise.all([
+        this.prisma.liveShoppingSession.findMany({
+          where,
+          skip,
+          take: limit,
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            title: true,
+            description: true,
+            status: true,
+            category: true,
+            scheduledStart: true,
+            actualStart: true,
+            actualEnd: true,
+            createdAt: true,
+            updatedAt: true,
+            retailerId: true,
+            retailer: {
+              select: {
+                id: true,
+                fullName: true,
+                businessName: true,
+                email: true,
+              },
             },
-          },
-          products: {
-            include: {
-              product: {
-                select: {
-                  id: true,
-                  name: true,
-                  price: true,
-                  currency: true,
-                  imageUrl: true,
-                  stockQuantity: true,
-                },
+            // ✅ OPTIMIZED: Only get product count, not full product data
+            _count: {
+              select: {
+                products: true,
+                messages: true,
+                participants: true,
               },
             },
           },
-          _count: {
+        }),
+        this.prisma.liveShoppingSession.count({ where }),
+      ])
+
+      // ✅ OPTIMIZED: Skip product fetching to avoid connection pool exhaustion
+      // Products can be fetched separately when needed (e.g., in session detail view)
+      const sessionsWithProducts = sessions.map((session) => ({
+        ...session,
+        products: [], // Empty array - products will be fetched separately if needed
+      }))
+
+      return {
+        sessions: sessionsWithProducts,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit),
+        },
+      }
+    } catch (error) {
+      this.logger.error('Error fetching live shopping sessions:', error)
+      throw error
+    }
+  }
+
+  // ✅ NEW: Get products for a specific session (when needed)
+  async getSessionProducts(sessionId: string) {
+    try {
+      const sessionProducts = await this.prisma.liveSessionProduct.findMany({
+        where: { sessionId },
+        select: {
+          product: {
             select: {
-              messages: true,
-              participants: true,
+              id: true,
+              name: true,
+              price: true,
+              currency: true,
+              imageUrl: true,
+              stockQuantity: true,
             },
           },
         },
-      }),
-      this.prisma.liveShoppingSession.count({ where }),
-    ])
+        take: 10, // Limit to 10 products
+      })
+      
+      return sessionProducts.map(sp => sp.product)
+    } catch (error) {
+      this.logger.error('Error fetching session products:', error)
+      return []
+    }
+  }
 
-    return {
-      sessions,
-      pagination: {
-        page,
-        limit,
-        total,
-        pages: Math.ceil(total / limit),
-      },
+  // ✅ NEW: Fast endpoint for session list (without products)
+  async getSessionsList(
+    page: number = 1,
+    limit: number = 10,
+    status?: string,
+    retailerId?: string,
+    category?: string
+  ) {
+    const skip = (page - 1) * limit
+
+    const where: any = {}
+    if (status) where.status = status
+    if (retailerId) where.retailerId = retailerId
+    if (category) where.category = category
+
+    try {
+      const [sessions, total] = await Promise.all([
+        this.prisma.liveShoppingSession.findMany({
+          where,
+          skip,
+          take: limit,
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            title: true,
+            description: true,
+            status: true,
+            category: true,
+            scheduledStart: true,
+            actualStart: true,
+            actualEnd: true,
+            createdAt: true,
+            retailerId: true,
+            retailer: {
+              select: {
+                id: true,
+                fullName: true,
+                businessName: true,
+              },
+            },
+            _count: {
+              select: {
+                products: true,
+                messages: true,
+                participants: true,
+              },
+            },
+          },
+        }),
+        this.prisma.liveShoppingSession.count({ where }),
+      ])
+
+      return {
+        sessions,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit),
+        },
+      }
+    } catch (error) {
+      this.logger.error('Error fetching live shopping sessions list:', error)
+      throw error
     }
   }
 

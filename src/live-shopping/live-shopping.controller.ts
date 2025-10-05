@@ -42,10 +42,37 @@ export class LiveShoppingController {
     )
   }
 
+  // ✅ NEW: Fast endpoint for session list (without products)
+  @Get("sessions/list")
+  async getSessionsList(
+    @Query("page") page?: string,
+    @Query("limit") limit?: string,
+    @Query("status") status?: string,
+    @Query("retailerId") retailerId?: string,
+    @Query("category") category?: string
+  ) {
+    const pageNum = page ? parseInt(page, 10) : 1
+    const limitNum = limit ? parseInt(limit, 10) : 10
+
+    return this.liveShoppingService.getSessionsList(
+      pageNum,
+      limitNum,
+      status,
+      retailerId,
+      category
+    )
+  }
+
   // Get session by ID
   @Get("sessions/:id")
   async getSessionById(@Param("id") id: string) {
     return this.liveShoppingService.getSessionById(id)
+  }
+
+  // ✅ NEW: Get products for a specific session
+  @Get("sessions/:id/products")
+  async getSessionProducts(@Param("id") id: string) {
+    return this.liveShoppingService.getSessionProducts(id)
   }
 
   // Create new live shopping session

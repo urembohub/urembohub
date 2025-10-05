@@ -9,63 +9,331 @@ export class AnalyticsService {
   async getDashboardAnalytics(userId?: string, userRole?: string, dateRange?: { from: string; to: string }) {
     const whereClause = this.buildWhereClause(userId, userRole, dateRange);
     
-    const [
-      // Order Analytics
-      orderStats,
-      revenueStats,
-      productStats,
-      serviceStats,
-      userStats,
-      paymentStats,
-      ticketStats,
-      reviewStats,
-      liveShoppingStats,
-      manufacturerOrderStats,
-      onboardingStats,
-    ] = await Promise.all([
-      this.getOrderAnalytics(whereClause),
-      this.getRevenueAnalytics(whereClause),
-      this.getProductAnalytics(whereClause),
-      this.getServiceAnalytics(whereClause),
-      this.getUserAnalytics(whereClause),
-      this.getPaymentAnalytics(whereClause),
-      this.getTicketAnalytics(whereClause),
-      this.getReviewAnalytics(whereClause),
-      this.getLiveShoppingAnalytics(whereClause),
-      this.getManufacturerOrderAnalytics(whereClause),
-      this.getOnboardingAnalytics(whereClause),
-    ]);
+    try {
+      // ✅ OPTIMIZED: Reduce concurrent database calls to prevent connection pool exhaustion
+      // Process in smaller batches to avoid overwhelming the connection pool
+      
+      // Batch 1: Core analytics (most important)
+      const [orderStats, revenueStats, userStats] = await Promise.all([
+        this.getOrderAnalytics(whereClause),
+        this.getRevenueAnalytics(whereClause),
+        this.getUserAnalytics(whereClause),
+      ]);
 
-    return {
-      orders: orderStats,
-      revenue: revenueStats,
-      products: productStats,
-      services: serviceStats,
-      users: userStats,
-      payments: paymentStats,
-      tickets: ticketStats,
-      reviews: reviewStats,
-      liveShopping: liveShoppingStats,
-      manufacturerOrders: manufacturerOrderStats,
-      onboarding: onboardingStats,
-      summary: this.generateSummary({
+      // Batch 2: Secondary analytics
+      const [productStats, serviceStats, paymentStats] = await Promise.all([
+        this.getProductAnalytics(whereClause),
+        this.getServiceAnalytics(whereClause),
+        this.getPaymentAnalytics(whereClause),
+      ]);
+
+      // Batch 3: Additional analytics (less critical)
+      const [ticketStats, reviewStats, liveShoppingStats] = await Promise.all([
+        this.getTicketAnalytics(whereClause),
+        this.getReviewAnalytics(whereClause),
+        this.getLiveShoppingAnalytics(whereClause),
+      ]);
+
+      // Batch 4: Final analytics
+      const [manufacturerOrderStats, onboardingStats] = await Promise.all([
+        this.getManufacturerOrderAnalytics(whereClause),
+        this.getOnboardingAnalytics(whereClause),
+      ]);
+
+      return {
+        orders: orderStats,
+        revenue: revenueStats,
+        products: productStats,
+        services: serviceStats,
+        users: userStats,
+        payments: paymentStats,
+        tickets: ticketStats,
+        reviews: reviewStats,
+        liveShopping: liveShoppingStats,
+        manufacturerOrders: manufacturerOrderStats,
+        onboarding: onboardingStats,
+        summary: this.generateSummary({
+          orderStats,
+          revenueStats,
+          productStats,
+          serviceStats,
+          userStats,
+          paymentStats,
+          ticketStats,
+          reviewStats,
+          liveShoppingStats,
+          manufacturerOrderStats,
+          onboardingStats,
+        }),
+      };
+    } catch (error) {
+      console.error('Error in getDashboardAnalytics:', error);
+      // Return minimal data if analytics fail
+      return {
+        orders: { total: 0, completed: 0, pending: 0, cancelled: 0 },
+        revenue: { total: 0, today: 0, thisWeek: 0, thisMonth: 0 },
+        products: { total: 0, active: 0, inactive: 0 },
+        services: { total: 0, active: 0, inactive: 0 },
+        users: { total: 0, active: 0, byRole: {} },
+        payments: { total: 0, successful: 0, failed: 0 },
+        tickets: { total: 0, open: 0, closed: 0 },
+        reviews: { total: 0, average: 0 },
+        liveShopping: { total: 0, live: 0, scheduled: 0 },
+        manufacturerOrders: { total: 0, pending: 0, completed: 0 },
+        onboarding: { total: 0, completed: 0, pending: 0 },
+        summary: { message: 'Analytics temporarily unavailable' },
+      };
+    }
+  }
+
+  // ✅ NEW: Lightweight dashboard analytics (faster, fewer DB calls)
+  async getLightDashboardAnalytics(userId?: string, userRole?: string, dateRange?: { from: string; to: string }) {
+    const whereClause = this.buildWhereClause(userId, userRole, dateRange);
+    
+    try {
+      // ✅ OPTIMIZED: Only get essential analytics with minimal DB calls
+      const [orderStats, revenueStats] = await Promise.all([
+        this.getOrderAnalytics(whereClause),
+        this.getRevenueAnalytics(whereClause),
+      ]);
+
+      return {
+        orders: orderStats,
+        revenue: revenueStats,
+        // Minimal data for other sections
+        products: { total: 0, active: 0, inactive: 0 },
+        services: { total: 0, active: 0, inactive: 0 },
+        users: { total: 0, active: 0, byRole: {} },
+        payments: { total: 0, successful: 0, failed: 0 },
+        tickets: { total: 0, open: 0, closed: 0 },
+        reviews: { total: 0, average: 0 },
+        liveShopping: { total: 0, live: 0, scheduled: 0 },
+        manufacturerOrders: { total: 0, pending: 0, completed: 0 },
+        onboarding: { total: 0, completed: 0, pending: 0 },
+        summary: { message: 'Lightweight analytics loaded' },
+      };
+    } catch (error) {
+      console.error('Error in getLightDashboardAnalytics:', error);
+      // Return minimal data if analytics fail
+      return {
+        orders: { total: 0, completed: 0, pending: 0, cancelled: 0 },
+        revenue: { total: 0, today: 0, thisWeek: 0, thisMonth: 0 },
+        products: { total: 0, active: 0, inactive: 0 },
+        services: { total: 0, active: 0, inactive: 0 },
+        users: { total: 0, active: 0, byRole: {} },
+        payments: { total: 0, successful: 0, failed: 0 },
+        tickets: { total: 0, open: 0, closed: 0 },
+        reviews: { total: 0, average: 0 },
+        liveShopping: { total: 0, live: 0, scheduled: 0 },
+        manufacturerOrders: { total: 0, pending: 0, completed: 0 },
+        onboarding: { total: 0, completed: 0, pending: 0 },
+        summary: { message: 'Analytics temporarily unavailable' },
+      };
+    }
+  }
+
+  // ✅ NEW: Unified retailer dashboard data
+  async getRetailerDashboard(retailerId: string) {
+    try {
+      const whereClause = this.buildWhereClause(retailerId, 'retailer');
+      
+      // ✅ OPTIMIZED: Get all retailer data in parallel batches
+      const [
+        // Core stats (most important)
         orderStats,
         revenueStats,
         productStats,
-        serviceStats,
-        userStats,
-        paymentStats,
-        ticketStats,
-        reviewStats,
         liveShoppingStats,
-        manufacturerOrderStats,
-        onboardingStats,
-      }),
-    };
+      ] = await Promise.all([
+        this.getOrderAnalytics(whereClause),
+        this.getRevenueAnalytics(whereClause),
+        this.getProductAnalytics(whereClause),
+        this.getLiveShoppingAnalytics(whereClause),
+      ]);
+
+      // ✅ OPTIMIZED: Get top products with single query
+      const topProducts = await this.getTopProductsForRetailer(retailerId, 5);
+
+      return {
+        // Core metrics
+        totalRevenue: revenueStats.total,
+        totalOrders: orderStats.total,
+        averageOrderValue: orderStats.total > 0 ? revenueStats.total / orderStats.total : 0,
+        pendingOrders: orderStats.pending,
+        
+        // Product metrics
+        totalProducts: productStats.total,
+        activeProducts: productStats.active,
+        lowStockProducts: productStats.lowStock || 0,
+        
+        // Live shopping metrics
+        totalLiveSessions: liveShoppingStats.totalSessions,
+        liveSessions: liveShoppingStats.live,
+        scheduledSessions: liveShoppingStats.scheduled,
+        
+        // Top products (simplified)
+        topProducts: topProducts,
+        
+        // Recent orders (limited to 10) - fetch separately
+        recentOrders: await this.getRecentOrdersForRetailer(retailerId, 10),
+        
+        // Customer stats (simplified) - fetch separately
+        customerStats: await this.getCustomerStatsForRetailer(retailerId),
+        
+        // Performance metrics
+        orderFulfillmentRate: orderStats.total > 0 ? 
+          ((orderStats.completed / orderStats.total) * 100) : 0,
+      };
+    } catch (error) {
+      console.error('Error in getRetailerDashboard:', error);
+      // Return minimal data if dashboard fails
+      return {
+        totalRevenue: 0,
+        totalOrders: 0,
+        averageOrderValue: 0,
+        pendingOrders: 0,
+        totalProducts: 0,
+        activeProducts: 0,
+        lowStockProducts: 0,
+        totalLiveSessions: 0,
+        liveSessions: 0,
+        scheduledSessions: 0,
+        topProducts: [],
+        recentOrders: [],
+        customerStats: { totalCustomers: 0, newCustomers: 0 },
+        orderFulfillmentRate: 0,
+      };
+    }
+  }
+
+  // ✅ NEW: Get top products for retailer (optimized)
+  private async getTopProductsForRetailer(retailerId: string, limit: number = 5) {
+    try {
+      // Single optimized query instead of complex joins
+      const topProducts = await this.prisma.$queryRaw`
+        SELECT 
+          p.id,
+          p.name,
+          p.image_url,
+          p.price,
+          p.stock_quantity,
+          COALESCE(SUM(oi.quantity), 0) as sales_count,
+          COALESCE(SUM(oi.quantity * oi.unit_price), 0) as revenue
+        FROM products p
+        LEFT JOIN order_items oi ON p.id = oi.product_id
+        LEFT JOIN orders o ON oi.order_id = o.id 
+          AND o.status IN ('confirmed', 'processing', 'shipped', 'delivered')
+          AND o.retailer_id = ${retailerId}
+        WHERE p.retailer_id = ${retailerId}
+        GROUP BY p.id, p.name, p.image_url, p.price, p.stock_quantity
+        ORDER BY revenue DESC
+        LIMIT ${limit}
+      `;
+      
+      // Convert BigInt values to numbers for JSON serialization
+      return (topProducts as any[]).map((product: any) => ({
+        ...product,
+        sales_count: Number(product.sales_count),
+        revenue: Number(product.revenue),
+        price: Number(product.price),
+        stock_quantity: Number(product.stock_quantity)
+      }));
+    } catch (error) {
+      console.error('Error fetching top products:', error);
+      return [];
+    }
+  }
+
+  // ✅ NEW: Get recent orders for retailer
+  private async getRecentOrdersForRetailer(retailerId: string, limit: number = 10) {
+    try {
+      const recentOrders = await this.prisma.order.findMany({
+        where: {
+          retailerId,
+          paymentReference: { not: null },
+          paymentStatus: 'paid',
+        },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        select: {
+          id: true,
+          totalAmount: true,
+          status: true,
+          createdAt: true,
+          customerEmail: true,
+          orderItems: {
+            select: {
+              title: true,
+              quantity: true,
+              unitPrice: true,
+            },
+          },
+        },
+      });
+
+      return recentOrders.map(order => ({
+        id: order.id,
+        totalAmount: order.totalAmount,
+        status: order.status,
+        createdAt: order.createdAt.toISOString(),
+        customerEmail: order.customerEmail,
+        orderItems: order.orderItems.map(item => ({
+          title: item.title || 'Unknown Product',
+          quantity: item.quantity,
+          price: item.unitPrice,
+        })),
+      }));
+    } catch (error) {
+      console.error('Error fetching recent orders:', error);
+      return [];
+    }
+  }
+
+  // ✅ NEW: Get customer stats for retailer
+  private async getCustomerStatsForRetailer(retailerId: string) {
+    try {
+      const [totalCustomers, newCustomers] = await Promise.all([
+        // Total unique customers
+        this.prisma.order.findMany({
+          where: {
+            retailerId,
+            paymentReference: { not: null },
+            paymentStatus: 'paid',
+          },
+          select: { userId: true },
+          distinct: ['userId'],
+        }),
+        
+        // New customers this month
+        this.prisma.order.findMany({
+          where: {
+            retailerId,
+            paymentReference: { not: null },
+            paymentStatus: 'paid',
+            createdAt: {
+              gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+            },
+          },
+          select: { userId: true },
+          distinct: ['userId'],
+        }),
+      ]);
+
+      return {
+        totalCustomers: totalCustomers.length,
+        newCustomers: newCustomers.length,
+      };
+    } catch (error) {
+      console.error('Error fetching customer stats:', error);
+      return {
+        totalCustomers: 0,
+        newCustomers: 0,
+      };
+    }
   }
 
   // Get order analytics
-  private async getOrderAnalytics(whereClause: any) {
+  public async getOrderAnalytics(whereClause: any) {
     // Only count orders with successful Paystack payments
     const paystackOrdersWhere = {
       ...whereClause.orders,
@@ -100,20 +368,20 @@ export class AnalyticsService {
     ]);
 
     return {
-      total: totalOrders,
-      pending: pendingOrders,
-      completed: completedOrders,
-      cancelled: cancelledOrders,
-      today: todayOrders,
-      thisWeek: weekOrders,
-      thisMonth: monthOrders,
+      total: Number(totalOrders),
+      pending: Number(pendingOrders),
+      completed: Number(completedOrders),
+      cancelled: Number(cancelledOrders),
+      today: Number(todayOrders),
+      thisWeek: Number(weekOrders),
+      thisMonth: Number(monthOrders),
       byStatus: ordersByStatus,
       byMonth: ordersByMonth,
     };
   }
 
   // Get revenue analytics
-  private async getRevenueAnalytics(whereClause: any) {
+  public async getRevenueAnalytics(whereClause: any) {
     // Only count revenue from successful Paystack payments
     const paystackOrdersWhere = {
       ...whereClause.orders,
@@ -164,7 +432,7 @@ export class AnalyticsService {
   }
 
   // Get product analytics
-  private async getProductAnalytics(whereClause: any) {
+  public async getProductAnalytics(whereClause: any) {
     const [
       totalProducts,
       activeProducts,
@@ -186,17 +454,17 @@ export class AnalyticsService {
     ]);
 
     return {
-      total: totalProducts,
-      active: activeProducts,
-      lowStock: lowStockProducts,
-      outOfStock: outOfStockProducts,
+      total: Number(totalProducts),
+      active: Number(activeProducts),
+      lowStock: Number(lowStockProducts),
+      outOfStock: Number(outOfStockProducts),
       byCategory: productsByCategory,
       topSelling: topSellingProducts,
     };
   }
 
   // Get service analytics
-  private async getServiceAnalytics(whereClause: any) {
+  public async getServiceAnalytics(whereClause: any) {
     const [
       totalServices,
       activeServices,
@@ -214,15 +482,15 @@ export class AnalyticsService {
     ]);
 
     return {
-      total: totalServices,
-      active: activeServices,
+      total: Number(totalServices),
+      active: Number(activeServices),
       byCategory: servicesByCategory,
       topRated: topRatedServices,
     };
   }
 
   // Get user analytics
-  private async getUserAnalytics(whereClause: any) {
+  public async getUserAnalytics(whereClause: any) {
     const [
       totalUsers,
       newUsersToday,
@@ -244,17 +512,17 @@ export class AnalyticsService {
     ]);
 
     return {
-      total: totalUsers,
-      newToday: newUsersToday,
-      newThisWeek: newUsersThisWeek,
-      newThisMonth: newUsersThisMonth,
+      total: Number(totalUsers),
+      newToday: Number(newUsersToday),
+      newThisWeek: Number(newUsersThisWeek),
+      newThisMonth: Number(newUsersThisMonth),
       byRole: usersByRole,
       active: activeUsers,
     };
   }
 
   // Get payment analytics
-  private async getPaymentAnalytics(whereClause: any) {
+  public async getPaymentAnalytics(whereClause: any) {
     const [
       totalTransactions,
       successfulTransactions,
@@ -286,9 +554,9 @@ export class AnalyticsService {
     ]);
 
     return {
-      totalTransactions,
-      successful: successfulTransactions,
-      failed: failedTransactions,
+      totalTransactions: Number(totalTransactions),
+      successful: Number(successfulTransactions),
+      failed: Number(failedTransactions),
       totalAmount: Number(totalAmount._sum.totalAmount || 0),
       todayAmount: Number(todayAmount._sum.totalAmount || 0),
       weekAmount: Number(weekAmount._sum.totalAmount || 0),
@@ -297,7 +565,7 @@ export class AnalyticsService {
   }
 
   // Get ticket analytics
-  private async getTicketAnalytics(whereClause: any) {
+  public async getTicketAnalytics(whereClause: any) {
     const [
       totalTickets,
       openTickets,
@@ -321,16 +589,16 @@ export class AnalyticsService {
     ]);
 
     return {
-      total: totalTickets,
-      open: openTickets,
-      closed: closedTickets,
+      total: Number(totalTickets),
+      open: Number(openTickets),
+      closed: Number(closedTickets),
       byPriority: ticketsByPriority,
       byStatus: ticketsByStatus,
     };
   }
 
   // Get review analytics
-  private async getReviewAnalytics(whereClause: any) {
+  public async getReviewAnalytics(whereClause: any) {
     const [
       totalReviews,
       averageRating,
@@ -364,7 +632,7 @@ export class AnalyticsService {
     ]);
 
     return {
-      total: totalReviews,
+      total: Number(totalReviews),
       averageRating: Number(averageRating._avg.rating || 0),
       byRating: reviewsByRating,
       recent: recentReviews,
@@ -372,7 +640,7 @@ export class AnalyticsService {
   }
 
   // Get live shopping analytics
-  private async getLiveShoppingAnalytics(whereClause: any) {
+  public async getLiveShoppingAnalytics(whereClause: any) {
     const [
       totalSessions,
       liveSessions,
@@ -390,17 +658,17 @@ export class AnalyticsService {
     ]);
 
     return {
-      totalSessions,
-      live: liveSessions,
-      scheduled: scheduledSessions,
-      ended: endedSessions,
-      totalMessages,
-      totalParticipants,
+      totalSessions: Number(totalSessions),
+      live: Number(liveSessions),
+      scheduled: Number(scheduledSessions),
+      ended: Number(endedSessions),
+      totalMessages: Number(totalMessages),
+      totalParticipants: Number(totalParticipants),
     };
   }
 
   // Get manufacturer order analytics
-  private async getManufacturerOrderAnalytics(whereClause: any) {
+  public async getManufacturerOrderAnalytics(whereClause: any) {
     const [
       totalOrders,
       pendingOrders,
@@ -421,17 +689,17 @@ export class AnalyticsService {
     ]);
 
     return {
-      total: totalOrders,
-      pending: pendingOrders,
-      confirmed: confirmedOrders,
-      shipped: shippedOrders,
-      delivered: deliveredOrders,
+      total: Number(totalOrders),
+      pending: Number(pendingOrders),
+      confirmed: Number(confirmedOrders),
+      shipped: Number(shippedOrders),
+      delivered: Number(deliveredOrders),
       totalRevenue: Number(totalRevenue._sum.totalAmount || 0),
     };
   }
 
   // Get onboarding analytics
-  private async getOnboardingAnalytics(whereClause: any) {
+  public async getOnboardingAnalytics(whereClause: any) {
     const [
       totalSubmissions,
       pendingSubmissions,
@@ -460,16 +728,16 @@ export class AnalyticsService {
     ]);
 
     return {
-      total: totalSubmissions,
-      pending: pendingSubmissions,
-      approved: approvedSubmissions,
-      rejected: rejectedSubmissions,
+      total: Number(totalSubmissions),
+      pending: Number(pendingSubmissions),
+      approved: Number(approvedSubmissions),
+      rejected: Number(rejectedSubmissions),
       byRole: submissionsByRole,
     };
   }
 
   // Helper methods
-  private buildWhereClause(userId?: string, userRole?: string, dateRange?: { from: string; to: string }) {
+  public buildWhereClause(userId?: string, userRole?: string, dateRange?: { from: string; to: string }) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
