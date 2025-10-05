@@ -1089,4 +1089,427 @@ export class AnalyticsService {
       totalOnboardingSubmissions: data.onboardingStats.total,
     };
   }
+
+  // ✅ NEW: Optimized executive summary for main dashboard
+  async getExecutiveSummary() {
+    try {
+      console.log('📊 [ANALYTICS] Fetching executive summary...');
+      
+      // Single optimized query for all main KPIs
+      const result = await this.prisma.$queryRaw`
+        SELECT 
+          -- User Metrics
+          (SELECT COUNT(*) FROM profiles WHERE role IN ('client', 'vendor', 'retailer', 'manufacturer')) as total_users,
+          (SELECT COUNT(*) FROM profiles WHERE role = 'vendor' AND is_verified = true AND is_suspended = false) as active_vendors,
+          (SELECT COUNT(*) FROM profiles WHERE role = 'retailer' AND is_verified = true AND is_suspended = false) as active_retailers,
+          (SELECT COUNT(*) FROM profiles WHERE role = 'manufacturer' AND is_verified = true AND is_suspended = false) as active_manufacturers,
+          (SELECT COUNT(*) FROM profiles WHERE onboarding_status = 'pending') as pending_verifications,
+          
+          -- Revenue Metrics (Current Month) - Orders that are confirmed/shipped/delivered/completed (considered paid)
+          (SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE status IN ('confirmed', 'shipped', 'delivered', 'completed') AND created_at >= date_trunc('month', CURRENT_DATE)) as monthly_revenue,
+          (SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE status IN ('confirmed', 'shipped', 'delivered', 'completed') AND created_at >= CURRENT_DATE) as today_revenue,
+          (SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE status IN ('confirmed', 'shipped', 'delivered', 'completed') AND created_at >= date_trunc('month', CURRENT_DATE - INTERVAL '1 month')) as last_month_revenue,
+          
+          -- Order Metrics
+          (SELECT COUNT(*) FROM orders WHERE created_at >= date_trunc('month', CURRENT_DATE)) as monthly_orders,
+          (SELECT COUNT(*) FROM orders WHERE created_at >= CURRENT_DATE) as today_orders,
+          (SELECT COUNT(*) FROM orders WHERE status = 'pending') as pending_orders,
+          (SELECT COUNT(*) FROM orders WHERE status IN ('confirmed', 'shipped', 'delivered', 'completed')) as completed_orders,
+          
+          -- Product/Service Metrics
+          (SELECT COUNT(*) FROM products WHERE is_active = true) as total_products,
+          (SELECT COUNT(*) FROM services WHERE is_active = true) as total_services,
+          
+          -- Escrow Metrics
+          (SELECT COALESCE(SUM(amount), 0) FROM service_escrows WHERE status = 'pending') as escrow_pending_amount,
+          (SELECT COUNT(*) FROM service_escrows WHERE status = 'pending') as escrow_pending_count,
+          (SELECT COUNT(*) FROM service_escrows WHERE status = 'completed') as escrow_completed_count,
+          (SELECT COUNT(*) FROM service_escrows WHERE status = 'disputed') as escrow_disputed_count
+      ` as any[];
+
+      const data = result[0];
+      
+      // Calculate growth rates
+      const revenueGrowth = data.last_month_revenue > 0 
+        ? ((data.monthly_revenue - data.last_month_revenue) / data.last_month_revenue * 100)
+        : 0;
+
+      const executiveSummary = {
+        // User Metrics
+        totalUsers: Number(data.total_users) || 0,
+        activeVendors: Number(data.active_vendors) || 0,
+        activeRetailers: Number(data.active_retailers) || 0,
+        activeManufacturers: Number(data.active_manufacturers) || 0,
+        pendingVerifications: Number(data.pending_verifications) || 0,
+        
+        // Revenue Metrics
+        monthlyRevenue: Number(data.monthly_revenue) || 0,
+        todayRevenue: Number(data.today_revenue) || 0,
+        revenueGrowth: Math.round(revenueGrowth * 100) / 100, // Round to 2 decimal places
+        
+        // Order Metrics
+        monthlyOrders: Number(data.monthly_orders) || 0,
+        todayOrders: Number(data.today_orders) || 0,
+        pendingOrders: Number(data.pending_orders) || 0,
+        completedOrders: Number(data.completed_orders) || 0,
+        
+        // Product/Service Metrics
+        totalProducts: Number(data.total_products) || 0,
+        totalServices: Number(data.total_services) || 0,
+        
+        // Escrow Metrics
+        escrowStats: {
+          pendingAmount: Number(data.escrow_pending_amount) || 0,
+          pendingCount: Number(data.escrow_pending_count) || 0,
+          completedCount: Number(data.escrow_completed_count) || 0,
+          disputedCount: Number(data.escrow_disputed_count) || 0,
+        },
+        
+        // Calculated Metrics
+        averageOrderValue: data.monthly_orders > 0 ? Number(data.monthly_revenue) / Number(data.monthly_orders) : 0,
+        completionRate: data.monthly_orders > 0 ? (Number(data.completed_orders) / Number(data.monthly_orders) * 100) : 0,
+      };
+
+      console.log('📊 [ANALYTICS] Executive summary fetched successfully');
+      return executiveSummary;
+      
+    } catch (error) {
+      console.error('❌ [ANALYTICS] Error fetching executive summary:', error);
+      throw new Error('Failed to fetch executive summary');
+    }
+  }
+
+  // ✅ NEW: Time Series Analytics Methods
+  async getRevenueTimeSeries(period: 'daily' | 'weekly' | 'monthly' = 'daily', days: number = 30) {
+    try {
+      console.log(`📊 [ANALYTICS] Fetching revenue time series: ${period} for ${days} days`);
+      
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+      
+      // Get all orders in the date range (confirmed/shipped/delivered/completed orders for revenue calculation)
+      const orders = await this.prisma.order.findMany({
+        where: {
+          status: { in: ['confirmed', 'shipped', 'delivered', 'completed'] },
+          createdAt: { gte: startDate }
+        },
+        select: {
+          createdAt: true,
+          totalAmount: true,
+          status: true,
+          paymentStatus: true
+        }
+      });
+
+      console.log(`📊 [ANALYTICS] Found ${orders.length} paid orders for revenue calculation`);
+      if (orders.length > 0) {
+        console.log(`📊 [ANALYTICS] Sample order:`, {
+          createdAt: orders[0].createdAt,
+          totalAmount: orders[0].totalAmount,
+          status: orders[0].status,
+          paymentStatus: orders[0].paymentStatus
+        });
+      }
+
+      // Generate complete date range
+      const dateRange: string[] = [];
+      const currentDate = new Date();
+      
+      for (let i = days - 1; i >= 0; i--) {
+        const date = new Date(currentDate);
+        date.setDate(date.getDate() - i);
+        
+        let periodKey: string;
+        if (period === 'daily') {
+          periodKey = date.toISOString().split('T')[0];
+        } else if (period === 'weekly') {
+          const weekStart = new Date(date);
+          weekStart.setDate(date.getDate() - date.getDay());
+          periodKey = weekStart.toISOString().split('T')[0];
+        } else { // monthly
+          periodKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`;
+        }
+        
+        if (!dateRange.includes(periodKey)) {
+          dateRange.push(periodKey);
+        }
+      }
+
+      // Group by period
+      const groupedData = new Map<string, { revenue: number; orderCount: number }>();
+      
+      // Initialize all periods with zero values
+      dateRange.forEach(periodKey => {
+        groupedData.set(periodKey, { revenue: 0, orderCount: 0 });
+      });
+      
+      orders.forEach(order => {
+        const date = new Date(order.createdAt);
+        let periodKey: string;
+        
+        if (period === 'daily') {
+          periodKey = date.toISOString().split('T')[0]; // YYYY-MM-DD
+        } else if (period === 'weekly') {
+          const weekStart = new Date(date);
+          weekStart.setDate(date.getDate() - date.getDay());
+          periodKey = weekStart.toISOString().split('T')[0];
+        } else { // monthly
+          periodKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`;
+        }
+        
+        if (groupedData.has(periodKey)) {
+          const data = groupedData.get(periodKey)!;
+          data.revenue += Number(order.totalAmount);
+          data.orderCount += 1;
+        }
+      });
+
+      // Convert to array with complete date range
+      const formattedData = dateRange
+        .map(periodKey => ({
+          period: periodKey,
+          revenue: groupedData.get(periodKey)?.revenue || 0,
+          orderCount: groupedData.get(periodKey)?.orderCount || 0
+        }));
+
+      console.log(`✅ [ANALYTICS] Revenue time series fetched: ${formattedData.length} data points`);
+      return formattedData;
+      
+    } catch (error) {
+      console.error('❌ [ANALYTICS] Error fetching revenue time series:', error);
+      throw new Error('Failed to fetch revenue time series');
+    }
+  }
+
+  async getOrderVolumeTimeSeries(period: 'daily' | 'weekly' | 'monthly' = 'daily', days: number = 30) {
+    try {
+      console.log(`📊 [ANALYTICS] Fetching order volume time series: ${period} for ${days} days`);
+      
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+      
+      // Get all orders in the date range
+      const orders = await this.prisma.order.findMany({
+        where: {
+          createdAt: { gte: startDate }
+        },
+        select: {
+          createdAt: true,
+          status: true,
+          paymentStatus: true
+        }
+      });
+
+      console.log(`📊 [ANALYTICS] Found ${orders.length} total orders for volume calculation`);
+      if (orders.length > 0) {
+        console.log(`📊 [ANALYTICS] Sample order:`, {
+          createdAt: orders[0].createdAt,
+          status: orders[0].status
+        });
+      }
+
+      // Generate complete date range
+      const dateRange: string[] = [];
+      const currentDate = new Date();
+      
+      for (let i = days - 1; i >= 0; i--) {
+        const date = new Date(currentDate);
+        date.setDate(date.getDate() - i);
+        
+        let periodKey: string;
+        if (period === 'daily') {
+          periodKey = date.toISOString().split('T')[0];
+        } else if (period === 'weekly') {
+          const weekStart = new Date(date);
+          weekStart.setDate(date.getDate() - date.getDay());
+          periodKey = weekStart.toISOString().split('T')[0];
+        } else { // monthly
+          periodKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`;
+        }
+        
+        if (!dateRange.includes(periodKey)) {
+          dateRange.push(periodKey);
+        }
+      }
+
+      // Group by period
+      const groupedData = new Map<string, { 
+        totalOrders: number; 
+        completedOrders: number; 
+        pendingOrders: number; 
+        cancelledOrders: number; 
+      }>();
+      
+      // Initialize all periods with zero values
+      dateRange.forEach(periodKey => {
+        groupedData.set(periodKey, { 
+          totalOrders: 0, 
+          completedOrders: 0, 
+          pendingOrders: 0, 
+          cancelledOrders: 0 
+        });
+      });
+      
+      orders.forEach(order => {
+        const date = new Date(order.createdAt);
+        let periodKey: string;
+        
+        if (period === 'daily') {
+          periodKey = date.toISOString().split('T')[0]; // YYYY-MM-DD
+        } else if (period === 'weekly') {
+          const weekStart = new Date(date);
+          weekStart.setDate(date.getDate() - date.getDay());
+          periodKey = weekStart.toISOString().split('T')[0];
+        } else { // monthly
+          periodKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`;
+        }
+        
+        if (groupedData.has(periodKey)) {
+          const data = groupedData.get(periodKey)!;
+          data.totalOrders += 1;
+          
+          if (['confirmed', 'shipped', 'delivered', 'completed'].includes(order.status)) {
+            data.completedOrders += 1;
+          } else if (order.status === 'pending') {
+            data.pendingOrders += 1;
+          } else if (order.status === 'cancelled') {
+            data.cancelledOrders += 1;
+          }
+        }
+      });
+
+      // Convert to array with complete date range
+      const formattedData = dateRange
+        .map(periodKey => ({
+          period: periodKey,
+          totalOrders: groupedData.get(periodKey)?.totalOrders || 0,
+          completedOrders: groupedData.get(periodKey)?.completedOrders || 0,
+          pendingOrders: groupedData.get(periodKey)?.pendingOrders || 0,
+          cancelledOrders: groupedData.get(periodKey)?.cancelledOrders || 0
+        }));
+
+      console.log(`✅ [ANALYTICS] Order volume time series fetched: ${formattedData.length} data points`);
+      return formattedData;
+      
+    } catch (error) {
+      console.error('❌ [ANALYTICS] Error fetching order volume time series:', error);
+      throw new Error('Failed to fetch order volume time series');
+    }
+  }
+
+  async getUserGrowthTimeSeries(period: 'daily' | 'weekly' | 'monthly' = 'daily', days: number = 30) {
+    try {
+      console.log(`📊 [ANALYTICS] Fetching user growth time series: ${period} for ${days} days`);
+      
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+      
+      // Get all profiles in the date range
+      const profiles = await this.prisma.profile.findMany({
+        where: {
+          createdAt: { gte: startDate }
+        },
+        select: {
+          createdAt: true,
+          role: true
+        }
+      });
+
+      // Generate complete date range
+      const dateRange: string[] = [];
+      const currentDate = new Date();
+      
+      for (let i = days - 1; i >= 0; i--) {
+        const date = new Date(currentDate);
+        date.setDate(date.getDate() - i);
+        
+        let periodKey: string;
+        if (period === 'daily') {
+          periodKey = date.toISOString().split('T')[0];
+        } else if (period === 'weekly') {
+          const weekStart = new Date(date);
+          weekStart.setDate(date.getDate() - date.getDay());
+          periodKey = weekStart.toISOString().split('T')[0];
+        } else { // monthly
+          periodKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`;
+        }
+        
+        if (!dateRange.includes(periodKey)) {
+          dateRange.push(periodKey);
+        }
+      }
+
+      // Group by period
+      const groupedData = new Map<string, { 
+        totalUsers: number; 
+        clients: number; 
+        vendors: number; 
+        retailers: number; 
+        manufacturers: number; 
+      }>();
+      
+      // Initialize all periods with zero values
+      dateRange.forEach(periodKey => {
+        groupedData.set(periodKey, { 
+          totalUsers: 0, 
+          clients: 0, 
+          vendors: 0, 
+          retailers: 0, 
+          manufacturers: 0 
+        });
+      });
+      
+      profiles.forEach(profile => {
+        const date = new Date(profile.createdAt);
+        let periodKey: string;
+        
+        if (period === 'daily') {
+          periodKey = date.toISOString().split('T')[0]; // YYYY-MM-DD
+        } else if (period === 'weekly') {
+          const weekStart = new Date(date);
+          weekStart.setDate(date.getDate() - date.getDay());
+          periodKey = weekStart.toISOString().split('T')[0];
+        } else { // monthly
+          periodKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`;
+        }
+        
+        if (groupedData.has(periodKey)) {
+          const data = groupedData.get(periodKey)!;
+          
+          // Only count non-admin users in totalUsers
+          if (profile.role !== 'admin') {
+            data.totalUsers += 1;
+          }
+          
+          if (profile.role === 'client') {
+            data.clients += 1;
+          } else if (profile.role === 'vendor') {
+            data.vendors += 1;
+          } else if (profile.role === 'retailer') {
+            data.retailers += 1;
+          } else if (profile.role === 'manufacturer') {
+            data.manufacturers += 1;
+          }
+        }
+      });
+
+      // Convert to array with complete date range
+      const formattedData = dateRange
+        .map(periodKey => ({
+          period: periodKey,
+          totalUsers: groupedData.get(periodKey)?.totalUsers || 0,
+          clients: groupedData.get(periodKey)?.clients || 0,
+          vendors: groupedData.get(periodKey)?.vendors || 0,
+          retailers: groupedData.get(periodKey)?.retailers || 0,
+          manufacturers: groupedData.get(periodKey)?.manufacturers || 0
+        }));
+
+      console.log(`✅ [ANALYTICS] User growth time series fetched: ${formattedData.length} data points`);
+      return formattedData;
+      
+    } catch (error) {
+      console.error('❌ [ANALYTICS] Error fetching user growth time series:', error);
+      throw new Error('Failed to fetch user growth time series');
+    }
+  }
 }

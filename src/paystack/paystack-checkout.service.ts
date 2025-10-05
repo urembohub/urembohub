@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { VerifyPaymentDto } from './dto/verify-payment.dto';
 import { PaymentsService } from '../payments/payments.service';
+import { EnhancedCommissionService } from '../commission/enhanced-commission.service';
 
 @Injectable()
 export class PaystackCheckoutService {
@@ -17,6 +18,7 @@ export class PaystackCheckoutService {
     private configService: ConfigService,
     private prisma: PrismaService,
     private paymentsService: PaymentsService,
+    private enhancedCommissionService: EnhancedCommissionService,
   ) {
     this.paystackSecretKey = this.configService.get<string>('PAYSTACK_SECRET_KEY');
     this.paystackPublicKey = this.configService.get<string>('PAYSTACK_PUBLIC_KEY');
@@ -558,9 +560,6 @@ export class PaystackCheckoutService {
     console.log('🔍 [CALCULATE_COMMISSION] Order Items:', order.orderItems?.length || 0);
     console.log('🔍 [CALCULATE_COMMISSION] Service Appointments:', order.serviceAppointments?.length || 0);
     
-    // Get platform commission rate (you can make this configurable)
-    const platformCommissionRate = 0.05; // 5% platform commission
-    
     // Calculate total amount from both products and services
     const productAmount = order.orderItems.reduce((sum: number, item: any) => {
       return sum + (item.quantity * item.unitPrice);
@@ -571,33 +570,48 @@ export class PaystackCheckoutService {
     }, 0) || 0;
 
     const totalAmount = productAmount + serviceAmount;
-    const platformCommission = totalAmount * platformCommissionRate;
-    const partnerAmount = totalAmount - platformCommission;
 
     console.log('🔍 [CALCULATE_COMMISSION] Amounts:', {
       productAmount,
       serviceAmount,
-      totalAmount,
-      platformCommission,
-      partnerAmount
+      totalAmount
     });
 
     // Determine partner type and get their information
     let partner = null;
     let partnerType = '';
+    let commissionData = null;
 
     // Check if this is a product order (retailer)
     if (order.orderItems.length > 0 && order.orderItems[0]?.product?.retailer) {
       partner = order.orderItems[0].product.retailer;
       partnerType = 'retailer';
       console.log('🔍 [CALCULATE_COMMISSION] Detected as PRODUCT order (retailer)');
+      
+      // Calculate commission using enhanced service
+      commissionData = await this.enhancedCommissionService.calculateCommission(
+        totalAmount,
+        partner.role as any,
+        partner.id
+      );
     }
     // Check if this is a service order (vendor)
     else if (order.serviceAppointments?.length > 0 && order.serviceAppointments[0]?.service?.vendor) {
       partner = order.serviceAppointments[0].service.vendor;
       partnerType = 'vendor';
       console.log('🔍 [CALCULATE_COMMISSION] Detected as SERVICE order (vendor)');
+      
+      // Calculate commission using enhanced service
+      commissionData = await this.enhancedCommissionService.calculateCommission(
+        totalAmount,
+        partner.role as any,
+        partner.id
+      );
     }
+
+    // Use commission data or fallback to platform fee
+    const platformCommission = commissionData ? commissionData.commissionAmount + commissionData.platformFee : totalAmount * 0.05;
+    const partnerAmount = totalAmount - platformCommission;
 
     console.log('🔍 [CALCULATE_COMMISSION] Partner info:', {
       partnerType,
@@ -630,7 +644,7 @@ export class PaystackCheckoutService {
       totalAmount,
       platformCommission,
       partnerAmount,
-      commissionRate: platformCommissionRate,
+      commissionRate: commissionData ? commissionData.commissionRate : 5.0,
       partnerSubaccountId: partner.paystackSubaccountId,
       partnerType,
       // splitCode: null, // Not using split codes anymore

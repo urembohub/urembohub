@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { EmailService } from '../email/email.service';
 import { PaystackService } from '../paystack/paystack.service';
 import { EscrowService } from '../escrow/escrow.service';
+import { EnhancedCommissionService } from '../commission/enhanced-commission.service';
 
 async function testEscrowFix() {
   try {
@@ -15,7 +16,8 @@ async function testEscrowFix() {
     const emailService = new EmailService(configService);
     const paystackService = new PaystackService(configService, prisma);
     const escrowService = new EscrowService(prisma, emailService, configService, paystackService);
-    const paymentsService = new PaymentsService(prisma, configService, escrowService, emailService);
+    const enhancedCommissionService = new EnhancedCommissionService(prisma);
+    const paymentsService = new PaymentsService(prisma, configService, escrowService, emailService, enhancedCommissionService);
 
     // Get a confirmed service order
     const confirmedOrder = await prisma.order.findFirst({

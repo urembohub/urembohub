@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { EscrowService } from '../escrow/escrow.service';
 import { EmailService } from '../email/email.service';
+import { EnhancedCommissionService } from '../commission/enhanced-commission.service';
 import axios from 'axios';
 
 export interface PaystackPaymentData {
@@ -51,6 +52,7 @@ export class PaymentsService {
     private configService: ConfigService,
     private escrowService: EscrowService,
     private emailService: EmailService,
+    private enhancedCommissionService: EnhancedCommissionService,
   ) {
     this.paystackSecretKey = this.configService.get<string>('PAYSTACK_SECRET_KEY');
     this.paystackPublicKey = this.configService.get<string>('PAYSTACK_PUBLIC_KEY');
@@ -864,8 +866,13 @@ export class PaymentsService {
       await this.createEscrowForServicePayments(order, reference);
       console.log('✅ [PAYMENT_CALLBACK] Escrow created successfully');
 
+      // Process commission transactions
+      console.log('💳 [PAYMENT_CALLBACK] Step 5: Processing commission transactions...');
+      await this.processCommissionTransactions(order, reference);
+      console.log('✅ [PAYMENT_CALLBACK] Commission transactions processed successfully');
+
       // Send payment success notifications
-      console.log('💳 [PAYMENT_CALLBACK] Step 5: Sending payment success notifications...');
+      console.log('💳 [PAYMENT_CALLBACK] Step 6: Sending payment success notifications...');
       await this.sendPaymentSuccessNotifications(order.id, reference);
       console.log('✅ [PAYMENT_CALLBACK] Payment success notifications sent');
 
@@ -1118,6 +1125,120 @@ export class PaymentsService {
     } catch (error) {
       console.error('❌ [ESCROW] Failed to create escrow for service payments:', error);
       // Don't fail payment processing if escrow creation fails
+    }
+  }
+
+  /**
+   * Process commission transactions for order
+   */
+  private async processCommissionTransactions(order: any, reference: string) {
+    try {
+      console.log('💰 [COMMISSION] Processing commission transactions for order:', order.id);
+
+      // Process commission for product orders (retailers)
+      for (const orderItem of order.orderItems) {
+        if (orderItem.product?.retailer) {
+          const retailer = orderItem.product.retailer;
+          const transactionAmount = Number(orderItem.totalPrice);
+          
+          console.log('💰 [COMMISSION] Processing retailer commission:', {
+            retailerId: retailer.id,
+            retailerRole: retailer.role,
+            transactionAmount,
+            productName: orderItem.product.name
+          });
+
+          // Calculate commission using enhanced service
+          const commissionData = await this.enhancedCommissionService.calculateCommission(
+            transactionAmount,
+            retailer.role as any,
+            retailer.id
+          );
+
+          // Create commission transaction record
+          await this.prisma.commissionTransaction.create({
+            data: {
+              businessUserId: retailer.id,
+              businessRole: retailer.role as any,
+              transactionType: 'product_sale',
+              transactionId: order.id,
+              transactionAmount: transactionAmount,
+              commissionRate: commissionData.commissionRate,
+              commissionAmount: commissionData.commissionAmount,
+              paymentStatus: 'pending',
+              metadata: {
+                orderId: order.id,
+                orderItemId: orderItem.id,
+                productId: orderItem.product.id,
+                productName: orderItem.product.name,
+                paystackReference: reference,
+                processedAt: new Date().toISOString()
+              }
+            }
+          });
+
+          console.log('✅ [COMMISSION] Retailer commission transaction created:', {
+            retailerId: retailer.id,
+            commissionAmount: commissionData.commissionAmount,
+            commissionRate: commissionData.commissionRate
+          });
+        }
+      }
+
+      // Process commission for service orders (vendors)
+      for (const appointment of order.serviceAppointments) {
+        if (appointment.service?.vendor) {
+          const vendor = appointment.service.vendor;
+          const transactionAmount = Number(appointment.servicePrice);
+          
+          console.log('💰 [COMMISSION] Processing vendor commission:', {
+            vendorId: vendor.id,
+            vendorRole: vendor.role,
+            transactionAmount,
+            serviceName: appointment.service.name
+          });
+
+          // Calculate commission using enhanced service
+          const commissionData = await this.enhancedCommissionService.calculateCommission(
+            transactionAmount,
+            vendor.role as any,
+            vendor.id
+          );
+
+          // Create commission transaction record
+          await this.prisma.commissionTransaction.create({
+            data: {
+              businessUserId: vendor.id,
+              businessRole: vendor.role as any,
+              transactionType: 'service_booking',
+              transactionId: order.id,
+              transactionAmount: transactionAmount,
+              commissionRate: commissionData.commissionRate,
+              commissionAmount: commissionData.commissionAmount,
+              paymentStatus: 'pending',
+              metadata: {
+                orderId: order.id,
+                appointmentId: appointment.id,
+                serviceId: appointment.service.id,
+                serviceName: appointment.service.name,
+                paystackReference: reference,
+                processedAt: new Date().toISOString()
+              }
+            }
+          });
+
+          console.log('✅ [COMMISSION] Vendor commission transaction created:', {
+            vendorId: vendor.id,
+            commissionAmount: commissionData.commissionAmount,
+            commissionRate: commissionData.commissionRate
+          });
+        }
+      }
+
+      console.log('✅ [COMMISSION] All commission transactions processed successfully');
+    } catch (error) {
+      console.error('❌ [COMMISSION] Failed to process commission transactions:', error);
+      // Don't fail payment processing if commission processing fails
     }
   }
 }

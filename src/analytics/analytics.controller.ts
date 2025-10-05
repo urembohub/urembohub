@@ -18,6 +18,13 @@ import { AnalyticsService } from './analytics.service';
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 
+  // ✅ NEW: Optimized executive summary for main dashboard
+  @Get('dashboard/executive-summary')
+  @UseGuards(JwtAuthGuard)
+  async getExecutiveSummary(@Request() req) {
+    return this.analyticsService.getExecutiveSummary();
+  }
+
   // Get comprehensive dashboard analytics
   @Get('dashboard')
   @UseGuards(JwtAuthGuard)
@@ -190,5 +197,39 @@ export class AnalyticsController {
     const dateRange = dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined;
     const whereClause = this.analyticsService.buildWhereClause(req.user.sub, req.user.role, dateRange);
     return this.analyticsService.getOnboardingAnalytics(whereClause);
+  }
+
+  // ✅ NEW: Time Series Analytics Endpoints
+  @Get('time-series/revenue')
+  @UseGuards(JwtAuthGuard)
+  async getRevenueTimeSeries(
+    @Request() req,
+    @Query('period') period: 'daily' | 'weekly' | 'monthly' = 'daily',
+    @Query('days') days: string = '30',
+  ) {
+    const daysNumber = parseInt(days, 10) || 30;
+    return this.analyticsService.getRevenueTimeSeries(period, daysNumber);
+  }
+
+  @Get('time-series/orders')
+  @UseGuards(JwtAuthGuard)
+  async getOrderVolumeTimeSeries(
+    @Request() req,
+    @Query('period') period: 'daily' | 'weekly' | 'monthly' = 'daily',
+    @Query('days') days: string = '30',
+  ) {
+    const daysNumber = parseInt(days, 10) || 30;
+    return this.analyticsService.getOrderVolumeTimeSeries(period, daysNumber);
+  }
+
+  @Get('time-series/users')
+  @UseGuards(JwtAuthGuard)
+  async getUserGrowthTimeSeries(
+    @Request() req,
+    @Query('period') period: 'daily' | 'weekly' | 'monthly' = 'daily',
+    @Query('days') days: string = '30',
+  ) {
+    const daysNumber = parseInt(days, 10) || 30;
+    return this.analyticsService.getUserGrowthTimeSeries(period, daysNumber);
   }
 }
