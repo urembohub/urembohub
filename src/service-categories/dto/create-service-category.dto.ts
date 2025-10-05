@@ -30,4 +30,8 @@ export class CreateServiceCategoryDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  showOnHomepage?: boolean;
 }

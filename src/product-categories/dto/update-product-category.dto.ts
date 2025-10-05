@@ -41,4 +41,8 @@ export class UpdateProductCategoryDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  showOnHomepage?: boolean
 }

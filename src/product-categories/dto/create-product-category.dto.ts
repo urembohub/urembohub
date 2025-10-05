@@ -38,4 +38,8 @@ export class CreateProductCategoryDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  showOnHomepage?: boolean
 }

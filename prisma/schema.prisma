@@ -746,6 +746,7 @@ model ServiceCategory {
   parentId          String?   @map("parent_id")
   position          Int
   isActive          Boolean   @default(true) @map("is_active")
+  showOnHomepage    Boolean   @default(false) @map("show_on_homepage")
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
@@ -769,6 +770,7 @@ model ProductCategory {
   parentId          String?   @map("parent_id")
   position          Int
   isActive          Boolean   @default(true) @map("is_active")
+  showOnHomepage    Boolean   @default(false) @map("show_on_homepage")
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 

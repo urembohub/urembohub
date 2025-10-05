@@ -74,7 +74,11 @@ export class ServiceCategoriesController {
 
   @UseGuards(JwtAuthGuard)
   @Delete(':id')
-  async deleteServiceCategory(@Param('id') id: string) {
-    return this.serviceCategoriesService.deleteServiceCategory(id);
+  async deleteServiceCategory(
+    @Param('id') id: string,
+    @Query('recursive') recursive?: string
+  ) {
+    const isRecursive = recursive === 'true';
+    return this.serviceCategoriesService.deleteServiceCategory(id, isRecursive);
   }
 }

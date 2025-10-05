@@ -126,6 +126,7 @@ export class ProductCategoriesService {
         parentId: true,
         position: true,
         isActive: true,
+        showOnHomepage: true,
         createdAt: true,
         updatedAt: true,
         parent: {
@@ -287,6 +288,27 @@ export class ProductCategoriesService {
     })
   }
 
+  // Helper method to get all descendants of a category using recursive CTE
+  private async getAllDescendants(parentId: string): Promise<any[]> {
+    // Use raw SQL with recursive CTE for better performance
+    const result = await this.prisma.$queryRaw`
+      WITH RECURSIVE descendants AS (
+        SELECT id, level, parent_id
+        FROM product_categories 
+        WHERE parent_id = ${parentId}
+        
+        UNION ALL
+        
+        SELECT pc.id, pc.level, pc.parent_id
+        FROM product_categories pc
+        INNER JOIN descendants d ON pc.parent_id = d.id
+      )
+      SELECT id, level FROM descendants
+    ` as { id: string; level: number }[]
+    
+    return result
+  }
+
   async deleteProductCategory(id: string, recursive: boolean = false) {
     const category = await this.getProductCategoryById(id)
 
@@ -316,13 +338,21 @@ export class ProductCategoriesService {
 
     // If recursive deletion is enabled, delete all children first
     if (recursive && childrenCount > 0) {
-      const children = await this.prisma.productCategory.findMany({
-        where: { parentId: id },
-        select: { id: true },
-      })
-
-      for (const child of children) {
-        await this.deleteProductCategory(child.id, true)
+      // Get all descendants in a single query
+      const allDescendants = await this.getAllDescendants(id)
+      
+      if (allDescendants.length > 0) {
+        // Use bulk deletion for better performance
+        const descendantIds = allDescendants.map(desc => desc.id)
+        
+        // Delete all descendants in a single transaction
+        await this.prisma.productCategory.deleteMany({
+          where: {
+            id: {
+              in: descendantIds
+            }
+          }
+        })
       }
     }
 

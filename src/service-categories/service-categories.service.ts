@@ -122,6 +122,7 @@ export class ServiceCategoriesService {
         parentId: true,
         position: true,
         isActive: true,
+        showOnHomepage: true,
         createdAt: true,
         updatedAt: true,
         parent: {
@@ -282,7 +283,28 @@ export class ServiceCategoriesService {
     });
   }
 
-  async deleteServiceCategory(id: string) {
+  // Helper method to get all descendants of a service category using recursive CTE
+  private async getAllServiceDescendants(parentId: string): Promise<any[]> {
+    // Use raw SQL with recursive CTE for better performance
+    const result = await this.prisma.$queryRaw`
+      WITH RECURSIVE descendants AS (
+        SELECT id, level, parent_id
+        FROM service_categories 
+        WHERE parent_id = ${parentId}
+        
+        UNION ALL
+        
+        SELECT sc.id, sc.level, sc.parent_id
+        FROM service_categories sc
+        INNER JOIN descendants d ON sc.parent_id = d.id
+      )
+      SELECT id, level FROM descendants
+    ` as { id: string; level: number }[]
+    
+    return result
+  }
+
+  async deleteServiceCategory(id: string, recursive: boolean = false) {
     const category = await this.getServiceCategoryById(id);
 
     // Check if category has children
@@ -290,8 +312,8 @@ export class ServiceCategoriesService {
       where: { parentId: id },
     });
 
-    if (childrenCount > 0) {
-      throw new BadRequestException('Cannot delete category with subcategories. Please delete subcategories first.');
+    if (childrenCount > 0 && !recursive) {
+      throw new BadRequestException('Cannot delete category with subcategories. Please delete subcategories first or use recursive deletion.');
     }
 
     // Check if category has services
@@ -307,6 +329,26 @@ export class ServiceCategoriesService {
 
     if (servicesCount > 0) {
       throw new BadRequestException('Cannot delete category with services. Please move or delete services first.');
+    }
+
+    // If recursive deletion is enabled, delete all children first
+    if (recursive && childrenCount > 0) {
+      // Get all descendants in a single query
+      const allDescendants = await this.getAllServiceDescendants(id);
+      
+      if (allDescendants.length > 0) {
+        // Use bulk deletion for better performance
+        const descendantIds = allDescendants.map(desc => desc.id);
+        
+        // Delete all descendants in a single transaction
+        await this.prisma.serviceCategory.deleteMany({
+          where: {
+            id: {
+              in: descendantIds
+            }
+          }
+        });
+      }
     }
 
     return this.prisma.serviceCategory.delete({
