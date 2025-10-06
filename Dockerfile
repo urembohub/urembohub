@@ -36,7 +36,7 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Generate Prisma Client
+# Generate Prisma Clien
 RUN npx prisma generate
 
 # Build NestJS application
