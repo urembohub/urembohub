@@ -20,7 +20,7 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
         with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          username: miniroot48
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
       - name: Build and Push Docker image
@@ -29,8 +29,8 @@ jobs:
           context: ./backend
           push: true
           tags: |
-            ${{ secrets.DOCKER_HUB_USERNAME }}/urembo-backend:latest
-            ${{ secrets.DOCKER_HUB_USERNAME }}/urembo-backend:${{ github.sha }}
+            miniroot48/urembo-backend:latest
+            miniroot48/urembo-backend:${{ github.sha }}
 
       - name: Deploy to Server
         if: github.ref == 'refs/heads/benard' && github.event_name == 'push'
@@ -54,7 +54,7 @@ jobs:
             docker rm backend-app || true
             
             # Pull latest image
-            docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/urembo-backend:latest
+            docker pull miniroot48/urembo-backend:latest
             
             # Run with volume mounts to persist data
             docker run -d \
@@ -65,7 +65,7 @@ jobs:
               -v /home/ubuntu/backend/logs:/app/logs \
               -v /home/ubuntu/backend/prisma:/app/prisma \
               --env-file /home/ubuntu/backend/.env \
-              ${{ secrets.DOCKER_HUB_USERNAME }}/urembo-backend:latest
+              miniroot48/urembo-backend:latest
             
             # Wait for service to be ready
             sleep 10
