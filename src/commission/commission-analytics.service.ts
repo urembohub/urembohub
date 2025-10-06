@@ -57,21 +57,19 @@ export class CommissionAnalyticsService {
         ? ((totalCommissionPaid - lastMonthTotal) / lastMonthTotal) * 100 
         : 0;
 
-      // Get commission by role (only completed transactions for consistency)
+      // Get commission by role
       const commissionByRole = {
         vendor: 0,
         retailer: 0,
         manufacturer: 0
       };
 
-      currentMonthCommissions
-        .filter(c => c.paymentStatus === 'completed')
-        .forEach(commission => {
-          const role = commission.businessRole;
-          if (role in commissionByRole) {
-            commissionByRole[role] += Number(commission.commissionAmount);
-          }
-        });
+      currentMonthCommissions.forEach(commission => {
+        const role = commission.businessRole;
+        if (role in commissionByRole) {
+          commissionByRole[role] += Number(commission.commissionAmount);
+        }
+      });
 
       // Get top earners
       const topEarners = await this.getTopCommissionEarners(10);
