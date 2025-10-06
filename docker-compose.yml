@@ -1,5 +1,4 @@
 version: '3.8'
-
 services:
   # NestJS Backend
   backend:
@@ -13,10 +12,8 @@ services:
     env_file:
       - .env
     volumes:
-      # Persist uploaded images
+      # Persist uploads folder on the host machine
       - ./uploads:/app/uploads
-      # Persist logs
-      - ./logs:/app/logs
     networks:
       - backend-network
     command: >
@@ -24,12 +21,6 @@ services:
         npx prisma migrate deploy &&
         node dist/src/main.js
       "
-
-volumes:
-  uploads:
-    driver: local
-  logs:
-    driver: local
 
 networks:
   backend-network:
