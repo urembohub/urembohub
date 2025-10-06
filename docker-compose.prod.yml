@@ -13,10 +13,12 @@ services:
     env_file:
       - .env
     volumes:
-      # Persist uploaded images
-      - ./uploads:/app/uploads
+      # Persist uploaded images and files
+      - uploads_data:/app/uploads
       # Persist logs
-      - ./logs:/app/logs
+      - logs_data:/app/logs
+      # Persist database (if using SQLite)
+      - database_data:/app/prisma
     networks:
       - backend-network
     command: >
@@ -24,11 +26,19 @@ services:
         npx prisma migrate deploy &&
         node dist/src/main.js
       "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 volumes:
-  uploads:
+  uploads_data:
     driver: local
-  logs:
+  logs_data:
+    driver: local
+  database_data:
     driver: local
 
 networks:

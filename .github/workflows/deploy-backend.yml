@@ -1,60 +1,80 @@
-name: Deploy Backend to Production
+name: Deploy Backend
 
 on:
   push:
     branches:
+      - main
       - benard
-  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
 
 jobs:
-  deploy:
-    name: Build and Deploy Backend
+  build-and-deploy:
     runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
-      
-      - name: Install dependencies
-        run: npm ci
-      
-      - name: Generate Prisma Client
-        run: npx prisma generate
-      
-      - name: Build application
-        run: npm run build
 
-      - name: Setup SSH Key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY_BASE64 }}" | base64 -d > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
-      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Build and Push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_HUB_USERNAME }}/urembo-backend:latest
+            ${{ secrets.DOCKER_HUB_USERNAME }}/urembo-backend:${{ github.sha }}
+
       - name: Deploy to Server
-        env:
-          SERVER_HOST: ${{ secrets.SERVER_HOST }}
-          SERVER_USER: ${{ secrets.SERVER_USER }}
-        run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_HOST} << 'ENDSSH'
-          cd ~/apps/backend
-          git pull origin benard
-          docker-compose down
-          docker-compose build --no-cache
-          docker-compose up -d
-          echo "✅ Deployment complete!"
-          docker-compose ps
-          ENDSSH
-      
-      - name: Verify Deployment
-        run: |
-          echo "Waiting for deployment to stabilize..."
-          sleep 20
-          curl -f https://api.urembohub.com/api || exit 1
-          echo "✅ Backend API is live!"
+        if: github.ref == 'refs/heads/benard' && github.event_name == 'push'
+        uses: appleboy/ssh-action@v0.1.6
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          script: |
+            # Navigate to backend directory
+            cd /home/ubuntu/backend || mkdir -p /home/ubuntu/backend && cd /home/ubuntu/backend
+            
+            # Create necessary directories
+            mkdir -p uploads logs prisma
+            
+            # Set proper permissions
+            chmod 755 uploads logs prisma
+            
+            # Stop existing container (preserve volumes)
+            docker stop backend-app || true
+            docker rm backend-app || true
+            
+            # Pull latest image
+            docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/urembo-backend:latest
+            
+            # Run with volume mounts to persist data
+            docker run -d \
+              --name backend-app \
+              --restart unless-stopped \
+              -p 3001:3000 \
+              -v /home/ubuntu/backend/uploads:/app/uploads \
+              -v /home/ubuntu/backend/logs:/app/logs \
+              -v /home/ubuntu/backend/prisma:/app/prisma \
+              --env-file /home/ubuntu/backend/.env \
+              ${{ secrets.DOCKER_HUB_USERNAME }}/urembo-backend:latest
+            
+            # Wait for service to be ready
+            sleep 10
+            
+            # Check if service is running
+            if docker ps | grep -q "backend-app"; then
+              echo "✅ Backend deployed successfully!"
+            else
+              echo "❌ Deployment failed!"
+              docker logs backend-app
+              exit 1
+            fi
