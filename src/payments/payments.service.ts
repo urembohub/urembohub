@@ -871,6 +871,11 @@ export class PaymentsService {
       await this.processCommissionTransactions(order, reference);
       console.log('✅ [PAYMENT_CALLBACK] Commission transactions processed successfully');
 
+      // Update commission transactions to completed status
+      console.log('💳 [PAYMENT_CALLBACK] Step 5.1: Updating commission transactions to completed...');
+      await this.updateCommissionTransactionsToCompleted(order.id);
+      console.log('✅ [PAYMENT_CALLBACK] Commission transactions updated to completed');
+
       // Send payment success notifications
       console.log('💳 [PAYMENT_CALLBACK] Step 6: Sending payment success notifications...');
       await this.sendPaymentSuccessNotifications(order.id, reference);
@@ -1125,6 +1130,59 @@ export class PaymentsService {
     } catch (error) {
       console.error('❌ [ESCROW] Failed to create escrow for service payments:', error);
       // Don't fail payment processing if escrow creation fails
+    }
+  }
+
+  /**
+   * Update commission transactions to completed status for a successful order
+   */
+  private async updateCommissionTransactionsToCompleted(orderId: string) {
+    try {
+      console.log('💰 [COMMISSION_UPDATE] Updating commission transactions to completed for order:', orderId);
+
+      // Find all pending commission transactions for this order
+      const pendingTransactions = await this.prisma.commissionTransaction.findMany({
+        where: {
+          transactionId: orderId,
+          paymentStatus: 'pending'
+        }
+      });
+
+      if (pendingTransactions.length === 0) {
+        console.log('💰 [COMMISSION_UPDATE] No pending commission transactions found for order:', orderId);
+        return;
+      }
+
+      console.log(`💰 [COMMISSION_UPDATE] Found ${pendingTransactions.length} pending commission transactions`);
+
+      // Update all pending transactions to completed
+      const updateResult = await this.prisma.commissionTransaction.updateMany({
+        where: {
+          transactionId: orderId,
+          paymentStatus: 'pending'
+        },
+        data: {
+          paymentStatus: 'completed',
+          processedAt: new Date()
+        }
+      });
+
+      console.log(`✅ [COMMISSION_UPDATE] Updated ${updateResult.count} commission transactions to completed status`);
+
+      // Log the updated transactions
+      for (const transaction of pendingTransactions) {
+        console.log(`💰 [COMMISSION_UPDATE] Updated transaction:`, {
+          id: transaction.id,
+          businessRole: transaction.businessRole,
+          commissionAmount: transaction.commissionAmount,
+          transactionType: transaction.transactionType
+        });
+      }
+
+    } catch (error) {
+      console.error('❌ [COMMISSION_UPDATE] Failed to update commission transactions:', error);
+      this.logger.error('Failed to update commission transactions:', error);
+      // Don't throw error to avoid breaking payment callback
     }
   }
 
