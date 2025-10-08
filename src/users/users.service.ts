@@ -4,13 +4,15 @@ import { user_role, onboarding_status } from '@prisma/client';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { OnboardingService } from '../onboarding/onboarding.service';
+import { CartCleanupService } from '../cart/cart-cleanup.service';
 import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class UsersService {
   constructor(
     private prisma: PrismaService,
-    private onboardingService: OnboardingService
+    private onboardingService: OnboardingService,
+    private cartCleanupService: CartCleanupService
   ) {}
 
   async findById(id: string) {
@@ -159,16 +161,45 @@ export class UsersService {
       });
 
       // Count related data before deletion
-      const [productCount, serviceCount, orderCount] = await Promise.all([
+      const [productCount, serviceCount, orderCount, wishlistCount, cartCount] = await Promise.all([
         this.prisma.product.count({ where: { retailerId: id } }),
         this.prisma.service.count({ where: { vendorId: id } }),
-        this.prisma.order.count({ where: { userId: id } })
+        this.prisma.order.count({ where: { userId: id } }),
+        this.prisma.wishlist.count({ where: { userId: id } }),
+        this.prisma.wishlist.count({ where: { 
+          OR: [
+            { product: { retailerId: id } },
+            { service: { vendorId: id } }
+          ]
+        }})
       ]);
 
       console.log('📊 [USER_DELETE] Related data counts:');
       console.log(`  - Products: ${productCount}`);
       console.log(`  - Services: ${serviceCount}`);
       console.log(`  - Orders: ${orderCount}`);
+      console.log(`  - User wishlist items: ${wishlistCount}`);
+      console.log(`  - Cart items from deleted products/services: ${cartCount}`);
+
+      // Get list of product/service IDs that will be deleted for cart cleanup
+      const [deletedProductIds, deletedServiceIds] = await Promise.all([
+        this.prisma.product.findMany({ 
+          where: { retailerId: id },
+          select: { id: true }
+        }),
+        this.prisma.service.findMany({ 
+          where: { vendorId: id },
+          select: { id: true }
+        })
+      ]);
+
+      // Clean up cart items before deletion
+      if (deletedProductIds.length > 0 || deletedServiceIds.length > 0) {
+        await this.cartCleanupService.cleanupDeletedItems(
+          deletedProductIds.map(p => p.id), 
+          deletedServiceIds.map(s => s.id)
+        );
+      }
 
       // Delete user (cascading deletes will handle products, services, etc.)
       const deletedUser = await this.prisma.profile.delete({
@@ -192,8 +223,12 @@ export class UsersService {
         deletedData: {
           products: productCount,
           services: serviceCount,
-          orders: orderCount
-        }
+          orders: orderCount,
+          wishlistItems: wishlistCount,
+          cartItems: cartCount
+        },
+        deletedProductIds: deletedProductIds.map(p => p.id),
+        deletedServiceIds: deletedServiceIds.map(s => s.id)
       };
     } catch (error) {
       console.error('❌ [USER_DELETE] Error deleting user:', error);
