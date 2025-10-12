@@ -1,17 +1,18 @@
-import { IsString, IsNumber, IsOptional, IsBoolean, IsArray, IsUUID, Min, MaxLength } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsBoolean, IsArray, IsUUID, Min, MaxLength, IsNotEmpty } from 'class-validator';
 
 export class CreateProductDto {
   @IsString()
+  @IsNotEmpty()
   @MaxLength(255)
   name: string;
 
-  @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @MaxLength(1000)
-  description?: string;
+  description: string;
 
   @IsNumber()
-  @Min(0)
+  @Min(0.01, { message: 'Price must be greater than 0' })
   price: number;
 
   @IsOptional()
@@ -24,14 +25,15 @@ export class CreateProductDto {
   @Min(0)
   stockQuantity?: number;
 
-  @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @MaxLength(500)
-  imageUrl?: string;
+  imageUrl: string;
 
-  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
   @IsUUID()
-  categoryId?: string;
+  categoryId: string;
 
   @IsOptional()
   @IsUUID()
