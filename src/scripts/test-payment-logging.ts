@@ -276,6 +276,3 @@ testPaymentLogging();
 
 
 
-
-
-

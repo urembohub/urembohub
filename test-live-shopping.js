@@ -60,6 +60,3 @@ async function testLiveShoppingEndpoints() {
 testLiveShoppingEndpoints();
 
 
-
-
-

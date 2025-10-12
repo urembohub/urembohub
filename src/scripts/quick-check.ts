@@ -80,6 +80,3 @@ quickCheck();
 
 
 
-
-
-

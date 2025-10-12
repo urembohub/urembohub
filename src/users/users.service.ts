@@ -1,18 +1,20 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { user_role, onboarding_status } from '@prisma/client';
-import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateProfileDto } from './dto/update-profile.dto';
-import { OnboardingService } from '../onboarding/onboarding.service';
-import { CartCleanupService } from '../cart/cart-cleanup.service';
-import * as bcrypt from 'bcryptjs';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from "@nestjs/common"
+import { PrismaService } from "../prisma/prisma.service"
+import { user_role, onboarding_status } from "@prisma/client"
+import { CreateUserDto } from "./dto/create-user.dto"
+import { UpdateProfileDto } from "./dto/update-profile.dto"
+import { OnboardingService } from "../onboarding/onboarding.service"
+import * as bcrypt from "bcryptjs"
 
 @Injectable()
 export class UsersService {
   constructor(
     private prisma: PrismaService,
-    private onboardingService: OnboardingService,
-    private cartCleanupService: CartCleanupService
+    private onboardingService: OnboardingService
   ) {}
 
   async findById(id: string) {
@@ -38,27 +40,30 @@ export class UsersService {
         paymentAccountDetails: true,
         paymentAccountType: true,
         paymentDetailsVerified: true,
+        deliveryDetails: true,
+        deliveryMethod: true,
+        deliveryDetailsVerified: true,
         createdAt: true,
         updatedAt: true,
       },
-    });
+    })
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException("User not found")
     }
 
-    return user;
+    return user
   }
 
   async hashPassword(password: string): Promise<string> {
-    const saltRounds = 10;
-    return bcrypt.hash(password, saltRounds);
+    const saltRounds = 10
+    return bcrypt.hash(password, saltRounds)
   }
 
   async findByEmail(email: string) {
     return this.prisma.profile.findUnique({
       where: { email },
-    });
+    })
   }
 
   async updateProfile(id: string, updateData: UpdateProfileDto) {
@@ -88,12 +93,12 @@ export class UsersService {
         createdAt: true,
         updatedAt: true,
       },
-    });
+    })
   }
 
   async getAllUsers(role?: user_role) {
-    const where = role ? { role } : {};
-    
+    const where = role ? { role } : {}
+
     const users = await this.prisma.profile.findMany({
       where,
       select: {
@@ -119,23 +124,26 @@ export class UsersService {
         createdAt: true,
         updatedAt: true,
       },
-      orderBy: { createdAt: 'desc' },
-    });
+      orderBy: { createdAt: "desc" },
+    })
 
-    return users;
+    return users
   }
 
   async verifyUser(id: string) {
     return this.prisma.profile.update({
       where: { id },
       data: { isVerified: true },
-    });
+    })
   }
 
   async deleteUser(id: string) {
     try {
-      console.log('🗑️ [USER_DELETE] Starting user deletion process for user:', id);
-      
+      console.log(
+        "🗑️ [USER_DELETE] Starting user deletion process for user:",
+        id
+      )
+
       // First, check if user exists
       const user = await this.prisma.profile.findUnique({
         where: { id },
@@ -144,112 +152,81 @@ export class UsersService {
           email: true,
           fullName: true,
           role: true,
-          businessName: true
-        }
-      });
+          businessName: true,
+        },
+      })
 
       if (!user) {
-        console.log('⚠️ [USER_DELETE] User not found:', id);
-        throw new NotFoundException('User not found');
+        console.log("⚠️ [USER_DELETE] User not found:", id)
+        throw new NotFoundException("User not found")
       }
 
-      console.log('👤 [USER_DELETE] User found:', {
+      console.log("👤 [USER_DELETE] User found:", {
         id: user.id,
         email: user.email,
         name: user.fullName || user.businessName,
-        role: user.role
-      });
+        role: user.role,
+      })
 
       // Count related data before deletion
-      const [productCount, serviceCount, orderCount, wishlistCount, cartCount] = await Promise.all([
+      const [productCount, serviceCount, orderCount] = await Promise.all([
         this.prisma.product.count({ where: { retailerId: id } }),
         this.prisma.service.count({ where: { vendorId: id } }),
         this.prisma.order.count({ where: { userId: id } }),
-        this.prisma.wishlist.count({ where: { userId: id } }),
-        this.prisma.wishlist.count({ where: { 
-          OR: [
-            { product: { retailerId: id } },
-            { service: { vendorId: id } }
-          ]
-        }})
-      ]);
+      ])
 
-      console.log('📊 [USER_DELETE] Related data counts:');
-      console.log(`  - Products: ${productCount}`);
-      console.log(`  - Services: ${serviceCount}`);
-      console.log(`  - Orders: ${orderCount}`);
-      console.log(`  - User wishlist items: ${wishlistCount}`);
-      console.log(`  - Cart items from deleted products/services: ${cartCount}`);
-
-      // Get list of product/service IDs that will be deleted for cart cleanup
-      const [deletedProductIds, deletedServiceIds] = await Promise.all([
-        this.prisma.product.findMany({ 
-          where: { retailerId: id },
-          select: { id: true }
-        }),
-        this.prisma.service.findMany({ 
-          where: { vendorId: id },
-          select: { id: true }
-        })
-      ]);
-
-      // Clean up cart items before deletion
-      if (deletedProductIds.length > 0 || deletedServiceIds.length > 0) {
-        await this.cartCleanupService.cleanupDeletedItems(
-          deletedProductIds.map(p => p.id), 
-          deletedServiceIds.map(s => s.id)
-        );
-      }
+      console.log("📊 [USER_DELETE] Related data counts:")
+      console.log(`  - Products: ${productCount}`)
+      console.log(`  - Services: ${serviceCount}`)
+      console.log(`  - Orders: ${orderCount}`)
 
       // Delete user (cascading deletes will handle products, services, etc.)
       const deletedUser = await this.prisma.profile.delete({
         where: { id },
-      });
+      })
 
-      console.log('✅ [USER_DELETE] User and all related data deleted successfully');
-      console.log('🗑️ [USER_DELETE] Cascading deletes handled:');
-      console.log(`  - ${productCount} products deleted`);
-      console.log(`  - ${serviceCount} services deleted`);
-      console.log(`  - All related orders, appointments, reviews, etc. deleted`);
+      console.log(
+        "✅ [USER_DELETE] User and all related data deleted successfully"
+      )
+      console.log("🗑️ [USER_DELETE] Cascading deletes handled:")
+      console.log(`  - ${productCount} products deleted`)
+      console.log(`  - ${serviceCount} services deleted`)
+      console.log(`  - All related orders, appointments, reviews, etc. deleted`)
 
       return {
         success: true,
-        message: 'User and all related data deleted successfully',
+        message: "User and all related data deleted successfully",
         deletedUser: {
           id: deletedUser.id,
           email: deletedUser.email,
-          name: deletedUser.fullName || deletedUser.businessName
+          name: deletedUser.fullName || deletedUser.businessName,
         },
         deletedData: {
           products: productCount,
           services: serviceCount,
           orders: orderCount,
-          wishlistItems: wishlistCount,
-          cartItems: cartCount
         },
-        deletedProductIds: deletedProductIds.map(p => p.id),
-        deletedServiceIds: deletedServiceIds.map(s => s.id)
-      };
-    } catch (error) {
-      console.error('❌ [USER_DELETE] Error deleting user:', error);
-      
-      if (error instanceof NotFoundException) {
-        throw error;
       }
-      
-      throw new Error(`Failed to delete user: ${error.message}`);
+    } catch (error) {
+      console.error("❌ [USER_DELETE] Error deleting user:", error)
+
+      if (error instanceof NotFoundException) {
+        throw error
+      }
+
+      throw new Error(`Failed to delete user: ${error.message}`)
     }
   }
 
   async createUser(createData: CreateUserDto) {
     // Check if user already exists
-    const existingUser = await this.findByEmail(createData.email);
+    const existingUser = await this.findByEmail(createData.email)
     if (existingUser) {
-      throw new BadRequestException('User with this email already exists');
+      throw new BadRequestException("User with this email already exists")
     }
 
-    const password = createData.fullName.toLowerCase().trim() + '@123';
-    const hashedPassword = await this.hashPassword(password);
+    const password = createData.fullName.toLowerCase().trim() + "@123"
+    const hashedPassword = await this.hashPassword(password)
 
     return this.prisma.profile.create({
       data: {
@@ -280,7 +257,7 @@ export class UsersService {
         createdAt: true,
         updatedAt: true,
       },
-    });
+    })
   }
 
   async suspendUser(id: string, suspendedBy: string, reason: string) {
@@ -292,7 +269,7 @@ export class UsersService {
         suspendedBy,
         suspensionReason: reason,
       },
-    });
+    })
   }
 
   async unsuspendUser(id: string) {
@@ -304,23 +281,33 @@ export class UsersService {
         suspendedBy: null,
         suspensionReason: null,
       },
-    });
+    })
   }
 
-  async updateOnboardingStatus(id: string, status: onboarding_status, adminId?: string, notes?: string, rejectionReason?: string) {
+  async updateOnboardingStatus(
+    id: string,
+    status: onboarding_status,
+    adminId?: string,
+    notes?: string,
+    rejectionReason?: string
+  ) {
     // Use the onboarding service which handles email notifications
     const result = await this.onboardingService.updateUserOnboardingStatus(
-      id, 
-      status, 
-      adminId || 'system', 
-      notes, 
+      id,
+      status,
+      adminId || "system",
+      notes,
       rejectionReason
-    );
-    
-    return result.user;
+    )
+
+    return result.user
   }
 
-  async updatePaymentDetails(id: string, paymentAccountDetails: any, paymentAccountType: string) {
+  async updatePaymentDetails(
+    id: string,
+    paymentAccountDetails: any,
+    paymentAccountType: string
+  ) {
     return this.prisma.profile.update({
       where: { id },
       data: {
@@ -328,18 +315,18 @@ export class UsersService {
         paymentAccountType,
         paymentDetailsVerified: false, // Reset verification status when details change
       },
-    });
+    })
   }
 
   async verifyPaymentDetails(id: string) {
     return this.prisma.profile.update({
       where: { id },
       data: { paymentDetailsVerified: true },
-    });
+    })
   }
 
   async getUsersByRole(role: user_role) {
-    return this.getAllUsers(role);
+    return this.getAllUsers(role)
   }
 
   async getSuspendedUsers() {
@@ -358,10 +345,10 @@ export class UsersService {
         suspensionReason: true,
         createdAt: true,
       },
-      orderBy: { suspendedAt: 'desc' },
-    });
+      orderBy: { suspendedAt: "desc" },
+    })
 
-    return users;
+    return users
   }
 
   async getUsersByOnboardingStatus(status: onboarding_status) {
@@ -377,10 +364,10 @@ export class UsersService {
         onboardingStatus: true,
         createdAt: true,
       },
-      orderBy: { createdAt: 'desc' },
-    });
+      orderBy: { createdAt: "desc" },
+    })
 
-    return users;
+    return users
   }
 
   async getUnverifiedUsers(limit?: number) {
@@ -409,15 +396,18 @@ export class UsersService {
         createdAt: true,
         updatedAt: true,
       },
-      orderBy: { createdAt: 'desc' },
-    };
-
-    if (limit && limit > 0) {
-      queryOptions.take = limit;
+      orderBy: { createdAt: "desc" },
     }
 
-    console.log('queryOptions*******************************', this.prisma.profile.findMany(queryOptions));
+    if (limit && limit > 0) {
+      queryOptions.take = limit
+    }
 
-    return this.prisma.profile.findMany(queryOptions);
+    console.log(
+      "queryOptions*******************************",
+      this.prisma.profile.findMany(queryOptions)
+    )
+
+    return this.prisma.profile.findMany(queryOptions)
   }
 }
