@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -11,306 +8,189 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-enum user_role {
-  client
-  vendor
-  retailer
-  admin
-  manufacturer
-}
-
-enum order_status {
-  pending
-  processing
-  shipped
-  delivered
-  cancelled
-  pending_confirmation
-  confirmed
-  completed
-}
-
-enum order_status_enhanced {
-  pending
-  paid
-  processing
-  shipped
-  delivered
-  completed
-  cancelled
-  refunded
-  disputed
-}
-
-enum order_status_new {
-  pending
-  paid
-  processing
-  fulfilled
-  cancelled
-}
-
-enum payment_status {
-  pending
-  processing
-  completed
-  failed
-  refunded
-}
-
-enum payment_provider {
-  stripe
-  paystack
-  mpesa
-}
-
-enum booking_status {
-  pending
-  confirmed
-  completed
-  cancelled
-  rejected
-}
-
-enum appointment_status_enhanced {
-  pending
-  confirmed
-  in_progress
-  completed
-  client_confirmed
-  cancelled
-  no_show
-  disputed
-}
-
-enum shipment_status {
-  pending
-  dispatched
-  in_transit
-  out_for_delivery
-  delivered
-  failed_delivery
-  returned
-}
-
-enum commission_source {
-  product
-  service
-}
-
-enum onboarding_status {
-  pending
-  in_progress
-  submitted
-  approved
-  rejected
-  revision_requested
-}
-
-enum onboarding_field_type {
-  text
-  textarea
-  select
-  file
-  email
-  phone
-  url
-  rich_text
-}
-
 model Profile {
-  id                          String             @id @default(uuid())
-  email                       String             @unique
-  password                    String // Hashed password for JWT auth
-  fullName                    String?            @map("full_name")
-  phone                       String?
-  avatarUrl                   String?            @map("avatar_url")
-  role                        user_role          @default(client)
-  businessName                String?            @map("business_name")
-  businessDescription         String?            @map("business_description")
-  businessAddress             String?            @map("business_address")
-  businessPhone               String?            @map("business_phone")
-  isVerified                  Boolean            @default(false) @map("is_verified")
-  isSuspended                 Boolean            @default(false) @map("is_suspended")
-  suspendedAt                 DateTime?          @map("suspended_at")
-  suspendedBy                 String?            @map("suspended_by")
-  suspensionReason            String?            @map("suspension_reason")
-  onboardingStatus            onboarding_status? @map("onboarding_status")
-  paymentAccountDetails       Json?              @map("payment_account_details")
-  paymentAccountType          String?            @map("payment_account_type")
-  paymentDetailsVerified      Boolean?           @default(false) @map("payment_details_verified")
-  deliveryDetails             Json?              @map("delivery_details")
-  deliveryMethod              String?            @map("delivery_method")
-  deliveryDetailsVerified     Boolean?           @default(false) @map("delivery_details_verified")
-  paystackSubaccountId        String?            @map("paystack_subaccount_id")
-  paystackSubaccountVerified  Boolean?           @default(false) @map("paystack_subaccount_verified")
-  paystackCommissionRate      Float?             @map("paystack_commission_rate")
-  paystackSubaccountCreatedAt DateTime?          @map("paystack_subaccount_created_at")
-  paystackSubaccountUpdatedAt DateTime?          @map("paystack_subaccount_updated_at")
-  paystackSubaccountStatus    String?            @map("paystack_subaccount_status") // active, suspended, deleted
-  paystackSettlementBank      String?            @map("paystack_settlement_bank")
-  paystackAccountNumber       String?            @map("paystack_account_number")
-  paystackBusinessName        String?            @map("paystack_business_name")
-  paystackPrimaryContactEmail String?            @map("paystack_primary_contact_email")
-  paystackPrimaryContactName  String?            @map("paystack_primary_contact_name")
-  paystackPrimaryContactPhone String?            @map("paystack_primary_contact_phone")
-  createdAt                   DateTime           @default(now()) @map("created_at")
-  updatedAt                   DateTime           @updatedAt @map("updated_at")
-
-  // Relations
-  products                         Product[]
-  services                         Service[]
-  orders                           Order[]
+  id                               String                     @id @default(uuid())
+  email                            String                     @unique
+  password                         String
+  fullName                         String?                    @map("full_name")
+  phone                            String?
+  avatarUrl                        String?                    @map("avatar_url")
+  role                             user_role                  @default(client)
+  businessName                     String?                    @map("business_name")
+  businessDescription              String?                    @map("business_description")
+  businessAddress                  String?                    @map("business_address")
+  businessPhone                    String?                    @map("business_phone")
+  isVerified                       Boolean                    @default(false) @map("is_verified")
+  isSuspended                      Boolean                    @default(false) @map("is_suspended")
+  suspendedAt                      DateTime?                  @map("suspended_at")
+  suspendedBy                      String?                    @map("suspended_by")
+  suspensionReason                 String?                    @map("suspension_reason")
+  onboardingStatus                 onboarding_status?         @map("onboarding_status")
+  paymentAccountDetails            Json?                      @map("payment_account_details")
+  paymentAccountType               String?                    @map("payment_account_type")
+  paymentDetailsVerified           Boolean?                   @default(false) @map("payment_details_verified")
+  paystackSubaccountId             String?                    @map("paystack_subaccount_id")
+  paystackSubaccountVerified       Boolean?                   @default(false) @map("paystack_subaccount_verified")
+  createdAt                        DateTime                   @default(now()) @map("created_at")
+  updatedAt                        DateTime                   @updatedAt @map("updated_at")
+  paystackAccountNumber            String?                    @map("paystack_account_number")
+  paystackBusinessName             String?                    @map("paystack_business_name")
+  paystackCommissionRate           Float?                     @map("paystack_commission_rate")
+  paystackPrimaryContactEmail      String?                    @map("paystack_primary_contact_email")
+  paystackPrimaryContactName       String?                    @map("paystack_primary_contact_name")
+  paystackPrimaryContactPhone      String?                    @map("paystack_primary_contact_phone")
+  paystackSettlementBank           String?                    @map("paystack_settlement_bank")
+  paystackSubaccountCreatedAt      DateTime?                  @map("paystack_subaccount_created_at")
+  paystackSubaccountStatus         String?                    @map("paystack_subaccount_status")
+  paystackSubaccountUpdatedAt      DateTime?                  @map("paystack_subaccount_updated_at")
+  deliveryDetails                  Json?                      @map("delivery_details")
+  deliveryDetailsVerified          Boolean?                   @default(false) @map("delivery_details_verified")
+  deliveryMethod                   String?                    @map("delivery_method")
   clientAppointments               Appointment[]              @relation("AppointmentClient")
   vendorAppointments               Appointment[]              @relation("AppointmentVendor")
-  serviceAppointments              ServiceAppointment[]
   commissionTransactions           CommissionTransaction[]
-  paymentMethods                   PaymentMethod[]
-  tickets                          Ticket[]
-  ticketResponses                  TicketResponse[]
-  staffAssignments                 StaffAssignment[]
-  roleAuditLogs                    RoleAuditLog[]
-  shipments                        Shipment[]
-  ticketAuditLogs                  TicketAuditLog[]
-  ticketConversations              TicketConversation[]
-  notifications                    Notification[]
-  wishlist                         Wishlist[]
-  staff                            Staff[]
-  serviceReviews                   ServiceReview[]            @relation("ServiceReviewClient")
-  vendorServiceReviews             ServiceReview[]            @relation("ServiceReviewVendor")
-  onboardingSubmissions            OnboardingSubmission[]
-  onboardingReviews                OnboardingReview[]         @relation("OnboardingReviewUser")
-  adminOnboardingReviews           OnboardingReview[]         @relation("OnboardingReviewAdmin")
-  onboardingHistory                OnboardingHistory[]        @relation("OnboardingHistoryUser")
-  adminOnboardingHistory           OnboardingHistory[]        @relation("OnboardingHistoryAdmin")
-  liveShoppingSessions             LiveShoppingSession[]
-  liveShoppingSessionsAsRetailer   LiveShoppingSession[]      @relation("LiveShoppingRetailer")
+  performedActions                 EscrowAction[]             @relation("PerformedActions")
   liveSessionMessages              LiveSessionMessage[]
   liveSessionParticipants          LiveSessionParticipant[]
-  manufacturerOrders               ManufacturerOrder[]
+  liveShoppingSessionsAsRetailer   LiveShoppingSession[]      @relation("LiveShoppingRetailer")
+  liveShoppingSessions             LiveShoppingSession[]
   manufacturerOrdersAsManufacturer ManufacturerOrder[]        @relation("ManufacturerOrderManufacturer")
-  reviews                          Review[]
-  vendorEscrows                    ServiceEscrow[]            @relation("VendorEscrows")
-  customerEscrows                  ServiceEscrow[]            @relation("CustomerEscrows")
-  createdEscrows                   ServiceEscrow[]            @relation("CreatedEscrows")
-  performedActions                 EscrowAction[]             @relation("PerformedActions")
+  manufacturerOrders               ManufacturerOrder[]
+  notifications                    Notification[]
+  adminOnboardingHistory           OnboardingHistory[]        @relation("OnboardingHistoryAdmin")
+  onboardingHistory                OnboardingHistory[]        @relation("OnboardingHistoryUser")
+  adminOnboardingReviews           OnboardingReview[]         @relation("OnboardingReviewAdmin")
+  onboardingReviews                OnboardingReview[]         @relation("OnboardingReviewUser")
+  onboardingSubmissions            OnboardingSubmission[]
+  orders                           Order[]
+  paymentMethods                   PaymentMethod[]
   paymentVerifications             PaymentVerificationQueue[] @relation("RetailerVerifications")
+  products                         Product[]
+  reviews                          Review[]
+  roleAuditLogs                    RoleAuditLog[]
+  serviceAppointments              ServiceAppointment[]
+  createdEscrows                   ServiceEscrow[]            @relation("CreatedEscrows")
+  customerEscrows                  ServiceEscrow[]            @relation("CustomerEscrows")
+  vendorEscrows                    ServiceEscrow[]            @relation("VendorEscrows")
+  serviceReviews                   ServiceReview[]            @relation("ServiceReviewClient")
+  vendorServiceReviews             ServiceReview[]            @relation("ServiceReviewVendor")
+  services                         Service[]
+  shipments                        Shipment[]
+  staff                            Staff[]
+  staffAssignments                 StaffAssignment[]
+  ticketAuditLogs                  TicketAuditLog[]
+  ticketConversations              TicketConversation[]
+  ticketResponses                  TicketResponse[]
+  tickets                          Ticket[]
+  wishlist                         Wishlist[]
 
   @@map("profiles")
 }
 
 model Product {
-  id             String     @id @default(uuid())
-  name           String
-  description    String?
-  price          Decimal    @db.Decimal(10, 2)
-  currency       String     @default("KES")
-  stockQuantity  Int        @default(0) @map("stock_quantity")
-  imageUrl       String?    @map("image_url")
-  categoryId     String?    @map("category_id")
-  subcategoryId  String?    @map("subcategory_id")
-  isActive       Boolean    @default(true) @map("is_active")
-  retailerId     String     @map("retailer_id")
-  manufacturerId String?    @map("manufacturer_id")
-  sku            String?    @map("sku")
-  tags           String[]
-  qcStatus       String?    @map("qc_status")
-  createdByRole  user_role? @map("created_by_role")
-  createdAt      DateTime   @default(now()) @map("created_at")
-  updatedAt      DateTime   @updatedAt @map("updated_at")
-
-  // Relations
-  retailer            Profile              @relation(fields: [retailerId], references: [id], onDelete: Cascade)
-  category            ProductCategory?     @relation("ProductCategory", fields: [categoryId], references: [id])
-  subcategory         ProductCategory?     @relation("ProductSubcategory", fields: [subcategoryId], references: [id])
-  orderItems          OrderItem[]
-  manufacturerOrders  ManufacturerOrder[]
+  id                  String               @id @default(uuid())
+  name                String
+  description         String?
+  price               Decimal              @db.Decimal(10, 2)
+  currency            String               @default("KES")
+  stockQuantity       Int                  @default(0) @map("stock_quantity")
+  imageUrl            String?              @map("image_url")
+  categoryId          String?              @map("category_id")
+  subcategoryId       String?              @map("subcategory_id")
+  isActive            Boolean              @default(true) @map("is_active")
+  retailerId          String               @map("retailer_id")
+  manufacturerId      String?              @map("manufacturer_id")
+  sku                 String?              @map("sku")
+  tags                String[]
+  qcStatus            String?              @map("qc_status")
+  createdByRole       user_role?           @map("created_by_role")
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
   liveSessionProducts LiveSessionProduct[]
+  manufacturerOrders  ManufacturerOrder[]
+  orderItems          OrderItem[]
+  category            ProductCategory?     @relation("ProductCategory", fields: [categoryId], references: [id])
+  retailer            Profile              @relation(fields: [retailerId], references: [id], onDelete: Cascade)
+  subcategory         ProductCategory?     @relation("ProductSubcategory", fields: [subcategoryId], references: [id])
   wishlist            Wishlist[]
 
   @@map("products")
 }
 
 model Service {
-  id              String   @id @default(uuid())
-  name            String
-  description     String?
-  price           Decimal  @db.Decimal(10, 2)
-  currency        String   @default("KES")
-  durationMinutes Int      @map("duration_minutes")
-  imageUrl        String?  @map("image_url")
-  category        String?
-  categoryId      String?  @map("category_id")
-  subcategoryId   String?  @map("subcategory_id")
-  actualServiceId String?  @map("actual_service_id")
-  deliveryMethod  String?  @map("delivery_method")
-  tags            String[]
-  metadata        Json?
-  isActive        Boolean  @default(true) @map("is_active")
-  vendorId        String   @map("vendor_id")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  vendor              Profile              @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  id                  String               @id @default(uuid())
+  name                String
+  description         String?
+  price               Decimal              @db.Decimal(10, 2)
+  currency            String               @default("KES")
+  durationMinutes     Int                  @map("duration_minutes")
+  imageUrl            String?              @map("image_url")
+  category            String?
+  categoryId          String?              @map("category_id")
+  subcategoryId       String?              @map("subcategory_id")
+  actualServiceId     String?              @map("actual_service_id")
+  deliveryMethod      String?              @map("delivery_method")
+  tags                String[]
+  metadata            Json?
+  isActive            Boolean              @default(true) @map("is_active")
+  vendorId            String               @map("vendor_id")
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
   appointments        Appointment[]
   serviceAppointments ServiceAppointment[]
+  escrows             ServiceEscrow[]
   serviceReviews      ServiceReview[]
+  actualService       ServiceCategory?     @relation("ServiceActual", fields: [actualServiceId], references: [id])
   serviceCategory     ServiceCategory?     @relation("ServiceCategory", fields: [categoryId], references: [id])
   serviceSubcategory  ServiceCategory?     @relation("ServiceSubcategory", fields: [subcategoryId], references: [id])
-  actualService       ServiceCategory?     @relation("ServiceActual", fields: [actualServiceId], references: [id])
+  vendor              Profile              @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   wishlist            Wishlist[]
-  escrows             ServiceEscrow[]
 
   @@map("services")
 }
 
 model Order {
-  id               String                 @id @default(uuid())
-  userId           String?                @map("user_id")
-  clientId         String?                @map("client_id")
-  vendorId         String?                @map("vendor_id")
-  retailerId       String?                @map("retailer_id")
-  manufacturerId   String?                @map("manufacturer_id")
-  serviceId        String?                @map("service_id")
-  serviceType      String?                @map("service_type")
-  totalAmount      Decimal                @map("total_amount") @db.Decimal(10, 2)
-  currency         String                 @default("KES")
-  status           order_status           @default(pending)
-  statusEnhanced   order_status_enhanced? @map("status_enhanced")
-  customerEmail    String                 @map("customer_email")
-  customerPhone    String?                @map("customer_phone")
-  shippingAddress  Json?                  @map("shipping_address")
-  notes            String?
-  escrowAmount     Decimal?               @map("escrow_amount") @db.Decimal(10, 2)
-  escrowStatus     String?                @map("escrow_status")
-  commissionAmount Decimal?               @map("commission_amount") @db.Decimal(10, 2)
-  commissionRate   Decimal?               @map("commission_rate") @db.Decimal(5, 2)
-
-  // Payment fields
-  paymentReference      String?   @map("payment_reference")
-  paymentStatus         String?   @map("payment_status") // pending, paid, failed
-  paymentMethod         String?   @map("payment_method")
-  paymentAmount         Decimal?  @map("payment_amount") @db.Decimal(10, 2)
-  paidAt                DateTime? @map("paid_at")
-  paystackReference     String?   @map("paystack_reference")
-  confirmedAt           DateTime? @map("confirmed_at")
-  completedAt           DateTime? @map("completed_at")
-  completionConfirmedAt DateTime? @map("completion_confirmed_at")
-  disputedAt            DateTime? @map("disputed_at")
-  autoReleaseAt         DateTime? @map("auto_release_at")
-  createdAt             DateTime  @default(now()) @map("created_at")
-  updatedAt             DateTime  @updatedAt @map("updated_at")
-
-  // Relations
-  user                 Profile?                   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  orderItems           OrderItem[]
-  serviceAppointments  ServiceAppointment[]
-  shipments            Shipment[]
-  tickets              Ticket[]
-  payments             Payment[]
-  escrows              ServiceEscrow[]
-  paymentVerifications PaymentVerificationQueue[]
+  id                    String                     @id @default(uuid())
+  userId                String?                    @map("user_id")
+  clientId              String?                    @map("client_id")
+  vendorId              String?                    @map("vendor_id")
+  retailerId            String?                    @map("retailer_id")
+  manufacturerId        String?                    @map("manufacturer_id")
+  serviceId             String?                    @map("service_id")
+  serviceType           String?                    @map("service_type")
+  totalAmount           Decimal                    @map("total_amount") @db.Decimal(10, 2)
+  currency              String                     @default("KES")
+  status                order_status               @default(pending)
+  statusEnhanced        order_status_enhanced?     @map("status_enhanced")
+  customerEmail         String                     @map("customer_email")
+  customerPhone         String?                    @map("customer_phone")
+  shippingAddress       Json?                      @map("shipping_address")
+  notes                 String?
+  escrowAmount          Decimal?                   @map("escrow_amount") @db.Decimal(10, 2)
+  escrowStatus          String?                    @map("escrow_status")
+  commissionAmount      Decimal?                   @map("commission_amount") @db.Decimal(10, 2)
+  commissionRate        Decimal?                   @map("commission_rate") @db.Decimal(5, 2)
+  paystackReference     String?                    @map("paystack_reference")
+  confirmedAt           DateTime?                  @map("confirmed_at")
+  completedAt           DateTime?                  @map("completed_at")
+  completionConfirmedAt DateTime?                  @map("completion_confirmed_at")
+  disputedAt            DateTime?                  @map("disputed_at")
+  autoReleaseAt         DateTime?                  @map("auto_release_at")
+  createdAt             DateTime                   @default(now()) @map("created_at")
+  updatedAt             DateTime                   @updatedAt @map("updated_at")
+  paidAt                DateTime?                  @map("paid_at")
+  paymentAmount         Decimal?                   @map("payment_amount") @db.Decimal(10, 2)
+  paymentMethod         String?                    @map("payment_method")
+  paymentReference      String?                    @map("payment_reference")
+  paymentStatus         String?                    @map("payment_status")
+  orderItems            OrderItem[]
+  user                  Profile?                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paymentVerifications  PaymentVerificationQueue[]
+  payments              Payment[]
+  serviceAppointments   ServiceAppointment[]
+  escrows               ServiceEscrow[]
+  shipments             Shipment[]
+  tickets               Ticket[]
 
   @@map("orders")
 }
@@ -329,10 +209,8 @@ model OrderItem {
   subtotal   Decimal? @db.Decimal(10, 2)
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@map("order_items")
 }
@@ -361,13 +239,11 @@ model Appointment {
   notes                 String?
   createdAt             DateTime                     @default(now()) @map("created_at")
   updatedAt             DateTime                     @updatedAt @map("updated_at")
-
-  // Relations
-  service        Service         @relation(fields: [serviceId], references: [id], onDelete: Cascade)
-  client         Profile         @relation("AppointmentClient", fields: [clientId], references: [id], onDelete: Cascade)
-  vendor         Profile         @relation("AppointmentVendor", fields: [vendorId], references: [id], onDelete: Cascade)
-  tickets        Ticket[]
-  serviceReviews ServiceReview[]
+  client                Profile                      @relation("AppointmentClient", fields: [clientId], references: [id], onDelete: Cascade)
+  service               Service                      @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  vendor                Profile                      @relation("AppointmentVendor", fields: [vendorId], references: [id], onDelete: Cascade)
+  serviceReviews        ServiceReview[]
+  tickets               Ticket[]
 
   @@map("appointments")
 }
@@ -386,11 +262,9 @@ model ServiceAppointment {
   notes           String?
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
-  vendor  Profile @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  service         Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  vendor          Profile  @relation(fields: [vendorId], references: [id], onDelete: Cascade)
 
   @@map("service_appointments")
 }
@@ -422,9 +296,7 @@ model CommissionTransaction {
   processedAt           DateTime? @map("processed_at")
   createdAt             DateTime  @default(now()) @map("created_at")
   metadata              Json?
-
-  // Relations
-  businessUser Profile @relation(fields: [businessUserId], references: [id], onDelete: Cascade)
+  businessUser          Profile   @relation(fields: [businessUserId], references: [id], onDelete: Cascade)
 
   @@map("commission_transactions")
 }
@@ -441,9 +313,7 @@ model PaymentMethod {
   isActive              Boolean  @default(true) @map("is_active")
   createdAt             DateTime @default(now()) @map("created_at")
   updatedAt             DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                  Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("payment_methods")
 }
@@ -464,7 +334,7 @@ model VendorScheduleSlot {
   id            String   @id @default(uuid())
   vendorId      String   @map("vendor_id")
   slotDate      DateTime @map("slot_date") @db.Date
-  slotTime      DateTime @map("slot_time") @db.Time
+  slotTime      DateTime @map("slot_time") @db.Time(6)
   isBlocked     Boolean  @default(false) @map("is_blocked")
   appointmentId String?  @map("appointment_id")
   createdAt     DateTime @default(now()) @map("created_at")
@@ -511,46 +381,42 @@ model TicketCategory {
   isActive    Boolean  @default(true) @map("is_active")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  tickets Ticket[]
+  tickets     Ticket[]
 
   @@map("ticket_categories")
 }
 
 model Ticket {
-  id                 String    @id @default(uuid())
-  ticketNumber       String    @unique @map("ticket_number")
+  id                 String               @id @default(uuid())
+  ticketNumber       String               @unique @map("ticket_number")
   title              String
   description        String
-  categoryId         String?   @map("category_id")
-  priority           String    @default("medium")
-  status             String    @default("open")
-  createdBy          String    @map("created_by")
-  assignedTo         String?   @map("assigned_to")
-  clientId           String?   @map("client_id")
-  orderId            String?   @map("order_id")
-  appointmentId      String?   @map("appointment_id")
+  categoryId         String?              @map("category_id")
+  priority           String               @default("medium")
+  status             String               @default("open")
+  createdBy          String               @map("created_by")
+  assignedTo         String?              @map("assigned_to")
+  clientId           String?              @map("client_id")
+  orderId            String?              @map("order_id")
+  appointmentId      String?              @map("appointment_id")
   tags               String[]
   metadata           Json?
-  resolvedAt         DateTime? @map("resolved_at")
-  closedAt           DateTime? @map("closed_at")
-  lastActivityAt     DateTime? @map("last_activity_at")
-  escalatedAt        DateTime? @map("escalated_at")
-  dueDate            DateTime? @map("due_date")
-  satisfactionRating Int?      @map("satisfaction_rating")
+  resolvedAt         DateTime?            @map("resolved_at")
+  closedAt           DateTime?            @map("closed_at")
+  lastActivityAt     DateTime?            @map("last_activity_at")
+  escalatedAt        DateTime?            @map("escalated_at")
+  dueDate            DateTime?            @map("due_date")
+  satisfactionRating Int?                 @map("satisfaction_rating")
   feedback           String?
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
-
-  // Relations
-  category         TicketCategory?      @relation(fields: [categoryId], references: [id])
-  createdByProfile Profile              @relation(fields: [createdBy], references: [id])
-  order            Order?               @relation(fields: [orderId], references: [id])
-  appointment      Appointment?         @relation(fields: [appointmentId], references: [id])
-  responses        TicketResponse[]
-  auditLogs        TicketAuditLog[]
-  conversations    TicketConversation[]
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+  auditLogs          TicketAuditLog[]
+  conversations      TicketConversation[]
+  responses          TicketResponse[]
+  appointment        Appointment?         @relation(fields: [appointmentId], references: [id])
+  category           TicketCategory?      @relation(fields: [categoryId], references: [id])
+  createdByProfile   Profile              @relation(fields: [createdBy], references: [id])
+  order              Order?               @relation(fields: [orderId], references: [id])
 
   @@map("tickets")
 }
@@ -564,10 +430,8 @@ model TicketResponse {
   attachments Json?
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  ticket Ticket  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  user   Profile @relation(fields: [userId], references: [id])
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user        Profile  @relation(fields: [userId], references: [id])
 
   @@map("ticket_responses")
 }
@@ -581,9 +445,7 @@ model StaffAssignment {
   isActive    Boolean  @default(true) @map("is_active")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  user Profile @relation(fields: [userId], references: [id])
+  user        Profile  @relation(fields: [userId], references: [id])
 
   @@unique([userId, role])
   @@map("staff_assignments")
@@ -597,31 +459,27 @@ model RoleAuditLog {
   newData   Json?
   changedBy String   @map("changed_by")
   createdAt DateTime @default(now()) @map("created_at")
-
-  // Relations
-  user Profile @relation(fields: [userId], references: [id])
+  user      Profile  @relation(fields: [userId], references: [id])
 
   @@map("role_audit_logs")
 }
 
 model Shipment {
-  id                    String    @id @default(uuid())
-  orderId               String    @map("order_id")
-  shipmentNumber        String    @unique @map("shipment_number")
-  deliveryPartner       String    @map("delivery_partner")
-  trackingNumber        String?   @map("tracking_number")
-  estimatedDeliveryDate DateTime? @map("estimated_delivery_date")
-  actualDeliveryDate    DateTime? @map("actual_delivery_date")
-  deliveryAddress       Json?     @map("delivery_address")
-  deliveryNotes         String?   @map("delivery_notes")
-  createdBy             String    @map("created_by")
-  createdAt             DateTime  @default(now()) @map("created_at")
-  updatedAt             DateTime  @updatedAt @map("updated_at")
-
-  // Relations
-  order            Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  createdByProfile Profile                @relation(fields: [createdBy], references: [id])
-  statusUpdates    ShipmentStatusUpdate[]
+  id                    String                 @id @default(uuid())
+  orderId               String                 @map("order_id")
+  shipmentNumber        String                 @unique @map("shipment_number")
+  deliveryPartner       String                 @map("delivery_partner")
+  trackingNumber        String?                @map("tracking_number")
+  estimatedDeliveryDate DateTime?              @map("estimated_delivery_date")
+  actualDeliveryDate    DateTime?              @map("actual_delivery_date")
+  deliveryAddress       Json?                  @map("delivery_address")
+  deliveryNotes         String?                @map("delivery_notes")
+  createdBy             String                 @map("created_by")
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+  statusUpdates         ShipmentStatusUpdate[]
+  createdByProfile      Profile                @relation(fields: [createdBy], references: [id])
+  order                 Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@map("shipments")
 }
@@ -636,48 +494,41 @@ model ShipmentStatusUpdate {
   updatedBy      String           @map("updated_by")
   updatedAt      DateTime         @default(now()) @map("updated_at")
   metadata       Json?
-
-  // Relations
-  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  shipment       Shipment         @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
 
   @@map("shipment_status_updates")
 }
 
 model TicketAuditLog {
-  id            String   @id @default(uuid())
-  ticketId      String   @map("ticket_id")
-  actionType    String   @map("action_type")
-  previousValue String?  @map("previous_value")
-  newValue      String?  @map("new_value")
-  performedBy   String   @map("performed_by")
-  performedAt   DateTime @default(now()) @map("performed_at")
-  metadata      Json?
-
-  // Relations
-  ticket             Ticket  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  performedByProfile Profile @relation(fields: [performedBy], references: [id])
+  id                 String   @id @default(uuid())
+  ticketId           String   @map("ticket_id")
+  actionType         String   @map("action_type")
+  previousValue      String?  @map("previous_value")
+  newValue           String?  @map("new_value")
+  performedBy        String   @map("performed_by")
+  performedAt        DateTime @default(now()) @map("performed_at")
+  metadata           Json?
+  performedByProfile Profile  @relation(fields: [performedBy], references: [id])
+  ticket             Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@map("ticket_audit_logs")
 }
 
 model TicketConversation {
-  id          String   @id @default(uuid())
-  ticketId    String   @map("ticket_id")
-  message     String
-  attachments Json?
-  isInternal  Boolean  @default(false) @map("is_internal")
-  createdBy   String   @map("created_by")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  ticket           Ticket  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  createdByProfile Profile @relation(fields: [createdBy], references: [id])
+  id               String   @id @default(uuid())
+  ticketId         String   @map("ticket_id")
+  message          String
+  attachments      Json?
+  isInternal       Boolean  @default(false) @map("is_internal")
+  createdBy        String   @map("created_by")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  createdByProfile Profile  @relation(fields: [createdBy], references: [id])
+  ticket           Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@map("ticket_conversations")
 }
 
-// Additional tables from Supabase schema
 model Payment {
   id                    String           @id @default(uuid())
   orderId               String           @map("order_id")
@@ -689,9 +540,7 @@ model Payment {
   providerResponse      Json?            @map("provider_response")
   createdAt             DateTime         @default(now()) @map("created_at")
   updatedAt             DateTime         @updatedAt @map("updated_at")
-
-  // Relations
-  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order                 Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@map("payments")
 }
@@ -707,9 +556,7 @@ model Notification {
   metadata  Json?
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  user Profile @relation(fields: [userId], references: [id])
+  user      Profile  @relation(fields: [userId], references: [id])
 
   @@map("notifications")
 }
@@ -722,11 +569,9 @@ model Wishlist {
   productId String?  @map("product_id")
   serviceId String?  @map("service_id")
   createdAt DateTime @default(now()) @map("created_at")
-
-  // Relations
-  user    Profile  @relation(fields: [userId], references: [id])
-  product Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
-  service Service? @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  product   Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
+  service   Service? @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  user      Profile  @relation(fields: [userId], references: [id])
 
   @@map("wishlist")
 }
@@ -742,44 +587,40 @@ model PasswordResetRequest {
 }
 
 model ServiceCategory {
-  id             String   @id @default(uuid())
-  name           String
-  description    String?
-  slug           String   @unique
-  imageUrl       String?  @map("image_url")
-  level          Int
-  parentId       String?  @map("parent_id")
-  position       Int
-  isActive       Boolean  @default(true) @map("is_active")
-  showOnHomepage Boolean  @default(false) @map("show_on_homepage")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
-
-  // Relations
+  id                  String            @id @default(uuid())
+  name                String
+  description         String?
+  slug                String            @unique
+  imageUrl            String?           @map("image_url")
+  level               Int
+  parentId            String?           @map("parent_id")
+  position            Int
+  isActive            Boolean           @default(true) @map("is_active")
+  createdAt           DateTime          @default(now()) @map("created_at")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
+  showOnHomepage      Boolean           @default(false) @map("show_on_homepage")
   parent              ServiceCategory?  @relation("ServiceCategoryParent", fields: [parentId], references: [id])
   children            ServiceCategory[] @relation("ServiceCategoryParent")
+  actualServices      Service[]         @relation("ServiceActual")
   services            Service[]         @relation("ServiceCategory")
   subcategoryServices Service[]         @relation("ServiceSubcategory")
-  actualServices      Service[]         @relation("ServiceActual")
 
   @@map("service_categories")
 }
 
 model ProductCategory {
-  id             String   @id @default(uuid())
-  name           String
-  description    String?
-  slug           String   @unique
-  imageUrl       String?  @map("image_url")
-  level          Int
-  parentId       String?  @map("parent_id")
-  position       Int
-  isActive       Boolean  @default(true) @map("is_active")
-  showOnHomepage Boolean  @default(false) @map("show_on_homepage")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
-
-  // Relations
+  id                  String            @id @default(uuid())
+  name                String
+  description         String?
+  slug                String            @unique
+  imageUrl            String?           @map("image_url")
+  level               Int
+  parentId            String?           @map("parent_id")
+  position            Int
+  isActive            Boolean           @default(true) @map("is_active")
+  createdAt           DateTime          @default(now()) @map("created_at")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
+  showOnHomepage      Boolean           @default(false) @map("show_on_homepage")
   parent              ProductCategory?  @relation("ProductCategoryParent", fields: [parentId], references: [id])
   children            ProductCategory[] @relation("ProductCategoryParent")
   products            Product[]         @relation("ProductCategory")
@@ -798,67 +639,59 @@ model Staff {
   isActive    Boolean  @default(true) @map("is_active")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  vendor Profile @relation(fields: [vendorId], references: [id])
+  vendor      Profile  @relation(fields: [vendorId], references: [id])
 
   @@map("staff")
 }
 
 model ServiceReview {
-  id            String   @id @default(uuid())
-  serviceId     String   @map("service_id")
-  appointmentId String   @map("appointment_id")
-  clientId      String   @map("client_id")
-  vendorId      String   @map("vendor_id")
-  staffId       String?  @map("staff_id")
+  id            String      @id @default(uuid())
+  serviceId     String      @map("service_id")
+  appointmentId String      @map("appointment_id")
+  clientId      String      @map("client_id")
+  vendorId      String      @map("vendor_id")
+  staffId       String?     @map("staff_id")
   rating        Int
-  reviewText    String?  @map("review_text")
-  createdAt     DateTime @default(now()) @map("created_at")
-
-  // Relations
-  service     Service     @relation(fields: [serviceId], references: [id])
-  appointment Appointment @relation(fields: [appointmentId], references: [id])
-  client      Profile     @relation("ServiceReviewClient", fields: [clientId], references: [id])
-  vendor      Profile     @relation("ServiceReviewVendor", fields: [vendorId], references: [id])
+  reviewText    String?     @map("review_text")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  appointment   Appointment @relation(fields: [appointmentId], references: [id])
+  client        Profile     @relation("ServiceReviewClient", fields: [clientId], references: [id])
+  service       Service     @relation(fields: [serviceId], references: [id])
+  vendor        Profile     @relation("ServiceReviewVendor", fields: [vendorId], references: [id])
 
   @@map("service_reviews")
 }
 
 model OnboardingRequirement {
-  id               String                @id @default(uuid())
+  id               String                 @id @default(uuid())
   role             user_role
   label            String
-  fieldType        onboarding_field_type @map("field_type")
-  isMandatory      Boolean               @default(true) @map("is_mandatory")
+  fieldType        onboarding_field_type  @map("field_type")
+  isMandatory      Boolean                @default(true) @map("is_mandatory")
   description      String?
   placeholder      String?
-  selectOptions    Json?                 @map("select_options")
-  position         Int                   @default(0)
-  isActive         Boolean               @default(true) @map("is_active")
-  isPaymentRelated Boolean?              @default(false) @map("is_payment_related")
-  validationRules  Json?                 @map("validation_rules")
-  createdAt        DateTime              @default(now()) @map("created_at")
-  updatedAt        DateTime              @updatedAt @map("updated_at")
-
-  // Relations
-  submissions OnboardingSubmission[]
+  selectOptions    Json?                  @map("select_options")
+  position         Int                    @default(0)
+  isActive         Boolean                @default(true) @map("is_active")
+  isPaymentRelated Boolean?               @default(false) @map("is_payment_related")
+  validationRules  Json?                  @map("validation_rules")
+  createdAt        DateTime               @default(now()) @map("created_at")
+  updatedAt        DateTime               @updatedAt @map("updated_at")
+  submissions      OnboardingSubmission[]
 
   @@map("onboarding_requirements")
 }
 
 model OnboardingSubmission {
-  id            String   @id @default(uuid())
-  userId        String   @map("user_id")
-  requirementId String   @map("requirement_id")
+  id            String                @id @default(uuid())
+  userId        String                @map("user_id")
+  requirementId String                @map("requirement_id")
   value         String?
-  fileUrl       String?  @map("file_url")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  user        Profile               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  requirement OnboardingRequirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  fileUrl       String?               @map("file_url")
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @updatedAt @map("updated_at")
+  requirement   OnboardingRequirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  user          Profile               @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, requirementId])
   @@map("onboarding_submissions")
@@ -873,10 +706,8 @@ model OnboardingReview {
   rejectionReason String?           @map("rejection_reason")
   createdAt       DateTime          @default(now()) @map("created_at")
   updatedAt       DateTime          @updatedAt @map("updated_at")
-
-  // Relations
-  user  Profile @relation("OnboardingReviewUser", fields: [userId], references: [id], onDelete: Cascade)
-  admin Profile @relation("OnboardingReviewAdmin", fields: [adminId], references: [id])
+  admin           Profile           @relation("OnboardingReviewAdmin", fields: [adminId], references: [id])
+  user            Profile           @relation("OnboardingReviewUser", fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("onboarding_reviews")
 }
@@ -885,22 +716,19 @@ model OnboardingHistory {
   id        String             @id @default(uuid())
   userId    String             @map("user_id")
   adminId   String?            @map("admin_id")
-  action    String // 'submission', 'status_change', 'approval', 'rejection', 'revision_requested'
-  details   Json? // Flexible data for different action types
+  action    String
+  details   Json?
   oldStatus onboarding_status? @map("old_status")
   newStatus onboarding_status? @map("new_status")
-  reason    String? // Reason for status change, rejection, etc.
-  metadata  Json? // Additional context data
+  reason    String?
+  metadata  Json?
   createdAt DateTime           @default(now()) @map("created_at")
-
-  // Relations
-  user  Profile  @relation("OnboardingHistoryUser", fields: [userId], references: [id], onDelete: Cascade)
-  admin Profile? @relation("OnboardingHistoryAdmin", fields: [adminId], references: [id])
+  admin     Profile?           @relation("OnboardingHistoryAdmin", fields: [adminId], references: [id])
+  user      Profile            @relation("OnboardingHistoryUser", fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("onboarding_history")
 }
 
-// CMS Models
 model CmsBanner {
   id               String   @id @default(uuid())
   title            String
@@ -909,12 +737,12 @@ model CmsBanner {
   mobileImageUrl   String?  @map("mobile_image_url")
   ctaText          String?  @map("cta_text")
   ctaLink          String?  @map("cta_link")
-  secondaryCtaText String?  @map("secondary_cta_text")
-  secondaryCtaLink String?  @map("secondary_cta_link")
   position         Int      @default(0)
   isActive         Boolean  @default(true) @map("is_active")
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
+  secondaryCtaLink String?  @map("secondary_cta_link")
+  secondaryCtaText String?  @map("secondary_cta_text")
 
   @@map("cms_banners")
 }
@@ -1072,96 +900,86 @@ model CmsPartnerSection {
   @@map("cms_partner_sections")
 }
 
-// Live Shopping Models
 model LiveShoppingSession {
-  id               String    @id @default(uuid())
+  id               String                   @id @default(uuid())
   title            String
   description      String?
-  vendorId         String    @map("vendor_id")
-  retailerId       String?   @map("retailer_id")
-  scheduledAt      DateTime  @map("scheduled_at")
-  scheduledStart   DateTime? @map("scheduled_start")
-  scheduledEnd     DateTime? @map("scheduled_end")
-  startedAt        DateTime? @map("started_at")
-  endedAt          DateTime? @map("ended_at")
-  actualStart      DateTime? @map("actual_start")
-  actualEnd        DateTime? @map("actual_end")
-  status           String    @default("scheduled") // scheduled, live, ended, cancelled
-  thumbnailUrl     String?   @map("thumbnail_url")
-  streamUrl        String?   @map("stream_url")
-  agoraChannelName String?   @map("agora_channel_name")
-  viewerCount      Int       @default(0) @map("viewer_count")
-  isActive         Boolean   @default(true) @map("is_active")
-  tags             String[]  @default([])
-  metadata         Json?
+  vendorId         String                   @map("vendor_id")
+  retailerId       String?                  @map("retailer_id")
+  scheduledAt      DateTime                 @map("scheduled_at")
+  startedAt        DateTime?                @map("started_at")
+  endedAt          DateTime?                @map("ended_at")
+  actualStart      DateTime?                @map("actual_start")
+  actualEnd        DateTime?                @map("actual_end")
+  status           String                   @default("scheduled")
+  thumbnailUrl     String?                  @map("thumbnail_url")
+  streamUrl        String?                  @map("stream_url")
+  viewerCount      Int                      @default(0) @map("viewer_count")
+  isActive         Boolean                  @default(true) @map("is_active")
+  createdAt        DateTime                 @default(now()) @map("created_at")
+  updatedAt        DateTime                 @updatedAt @map("updated_at")
+  agoraChannelName String?                  @map("agora_channel_name")
   category         String?
-  language         String?   @default("en")
-  timezone         String?   @default("UTC")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
-
-  // Relations
-  vendor       Profile                  @relation(fields: [vendorId], references: [id], onDelete: Cascade)
-  retailer     Profile?                 @relation("LiveShoppingRetailer", fields: [retailerId], references: [id], onDelete: Cascade)
-  products     LiveSessionProduct[]
-  messages     LiveSessionMessage[]
-  participants LiveSessionParticipant[]
+  language         String?                  @default("en")
+  metadata         Json?
+  scheduledEnd     DateTime?                @map("scheduled_end")
+  scheduledStart   DateTime?                @map("scheduled_start")
+  tags             String[]                 @default([])
+  timezone         String?                  @default("UTC")
+  messages         LiveSessionMessage[]
+  participants     LiveSessionParticipant[]
+  products         LiveSessionProduct[]
+  retailer         Profile?                 @relation("LiveShoppingRetailer", fields: [retailerId], references: [id], onDelete: Cascade)
+  vendor           Profile                  @relation(fields: [vendorId], references: [id], onDelete: Cascade)
 
   @@map("live_shopping_sessions")
 }
 
 model LiveSessionProduct {
-  id                  String    @id @default(uuid())
-  sessionId           String    @map("session_id")
-  productId           String    @map("product_id")
-  isFeatured          Boolean   @default(false) @map("is_featured")
-  isCurrentlyFeatured Boolean   @default(false) @map("is_currently_featured")
-  featuredAt          DateTime? @map("featured_at")
-  position            Int       @default(0)
-  createdAt           DateTime  @default(now()) @map("created_at")
-
-  // Relations
-  session LiveShoppingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  product Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  id                  String              @id @default(uuid())
+  sessionId           String              @map("session_id")
+  productId           String              @map("product_id")
+  isFeatured          Boolean             @default(false) @map("is_featured")
+  isCurrentlyFeatured Boolean             @default(false) @map("is_currently_featured")
+  featuredAt          DateTime?           @map("featured_at")
+  position            Int                 @default(0)
+  createdAt           DateTime            @default(now()) @map("created_at")
+  product             Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  session             LiveShoppingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, productId])
   @@map("live_session_products")
 }
 
 model LiveSessionMessage {
-  id          String   @id @default(uuid())
-  sessionId   String   @map("session_id")
-  userId      String   @map("user_id")
+  id          String              @id @default(uuid())
+  sessionId   String              @map("session_id")
+  userId      String              @map("user_id")
   message     String
-  messageType String   @default("text") @map("message_type")
-  isModerator Boolean  @default(false) @map("is_moderator")
-  createdAt   DateTime @default(now()) @map("created_at")
-
-  // Relations
-  session LiveShoppingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  user    Profile             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messageType String              @default("text") @map("message_type")
+  isModerator Boolean             @default(false) @map("is_moderator")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  session     LiveShoppingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user        Profile             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("live_session_messages")
 }
 
 model LiveSessionParticipant {
-  id         String    @id @default(uuid())
-  sessionId  String    @map("session_id")
-  userId     String    @map("user_id")
-  joinedAt   DateTime  @default(now()) @map("joined_at")
-  leftAt     DateTime? @map("left_at")
-  lastSeenAt DateTime? @map("last_seen_at")
-  isActive   Boolean   @default(true) @map("is_active")
-
-  // Relations
-  session LiveShoppingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  user    Profile             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id         String              @id @default(uuid())
+  sessionId  String              @map("session_id")
+  userId     String              @map("user_id")
+  joinedAt   DateTime            @default(now()) @map("joined_at")
+  leftAt     DateTime?           @map("left_at")
+  lastSeenAt DateTime?           @map("last_seen_at")
+  isActive   Boolean             @default(true) @map("is_active")
+  session    LiveShoppingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user       Profile             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, userId])
   @@map("live_session_participants")
 }
 
-// Manufacturer Orders Models
 model ManufacturerOrder {
   id                    String    @id @default(uuid())
   retailerId            String    @map("retailer_id")
@@ -1175,7 +993,7 @@ model ManufacturerOrder {
   shippingCost          Decimal?  @default(0) @db.Decimal(10, 2)
   totalAmount           Decimal   @map("total_amount") @db.Decimal(10, 2)
   currency              String    @default("KES")
-  status                String    @default("pending") // pending, confirmed, processing, shipped, delivered, cancelled
+  status                String    @default("pending")
   requestedDeliveryDate DateTime? @map("requested_delivery_date")
   estimatedDeliveryDate DateTime? @map("estimated_delivery_date")
   actualDeliveryDate    DateTime? @map("actual_delivery_date")
@@ -1183,21 +1001,18 @@ model ManufacturerOrder {
   notes                 String?
   createdAt             DateTime  @default(now()) @map("created_at")
   updatedAt             DateTime  @updatedAt @map("updated_at")
-
-  // Relations
-  retailer     Profile @relation(fields: [retailerId], references: [id], onDelete: Cascade)
-  manufacturer Profile @relation("ManufacturerOrderManufacturer", fields: [manufacturerId], references: [id], onDelete: Cascade)
-  product      Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  manufacturer          Profile   @relation("ManufacturerOrderManufacturer", fields: [manufacturerId], references: [id], onDelete: Cascade)
+  product               Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  retailer              Profile   @relation(fields: [retailerId], references: [id], onDelete: Cascade)
 
   @@map("manufacturer_orders")
 }
 
-// Review Models
 model Review {
   id         String   @id @default(uuid())
   userId     String   @map("user_id")
   itemId     String   @map("item_id")
-  itemType   String   @map("item_type") // product, service
+  itemType   String   @map("item_type")
   rating     Int
   title      String?
   comment    String?
@@ -1205,9 +1020,7 @@ model Review {
   isActive   Boolean  @default(true) @map("is_active")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, itemId, itemType])
   @@map("reviews")
@@ -1225,51 +1038,176 @@ model PaystackSplit {
   @@map("paystack_splits")
 }
 
-// Service Escrow System
 model ServiceEscrow {
-  id                String       @id @default(cuid())
-  orderId           String       @map("order_id")
-  serviceId         String       @map("service_id")
-  vendorId          String       @map("vendor_id")
-  customerId        String?      @map("customer_id")
-  amount            Decimal      @db.Decimal(10, 2)
-  currency          String       @default("KES")
-  status            EscrowStatus @default(pending)
-  paystackReference String?      @map("paystack_reference")
-  holdReference     String?      @map("hold_reference")
-  createdAt         DateTime     @default(now()) @map("created_at")
-  releasedAt        DateTime?    @map("released_at")
-  autoReleaseDate   DateTime     @map("auto_release_date")
-  disputeReason     String?      @map("dispute_reason")
-  adminNotes        String?      @map("admin_notes")
-  createdBy         String?      @map("created_by")
-  updatedAt         DateTime     @updatedAt @map("updated_at")
-
-  // Relations
-  order    Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  service  Service        @relation(fields: [serviceId], references: [id], onDelete: Cascade)
-  vendor   Profile        @relation("VendorEscrows", fields: [vendorId], references: [id], onDelete: Cascade)
-  customer Profile?       @relation("CustomerEscrows", fields: [customerId], references: [id], onDelete: SetNull)
-  creator  Profile?       @relation("CreatedEscrows", fields: [createdBy], references: [id])
-  actions  EscrowAction[]
+  id                String         @id @default(cuid())
+  orderId           String         @map("order_id")
+  serviceId         String         @map("service_id")
+  vendorId          String         @map("vendor_id")
+  customerId        String?        @map("customer_id")
+  amount            Decimal        @db.Decimal(10, 2)
+  currency          String         @default("KES")
+  status            EscrowStatus   @default(pending)
+  paystackReference String?        @map("paystack_reference")
+  holdReference     String?        @map("hold_reference")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  releasedAt        DateTime?      @map("released_at")
+  autoReleaseDate   DateTime       @map("auto_release_date")
+  disputeReason     String?        @map("dispute_reason")
+  adminNotes        String?        @map("admin_notes")
+  createdBy         String?        @map("created_by")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+  actions           EscrowAction[]
+  creator           Profile?       @relation("CreatedEscrows", fields: [createdBy], references: [id])
+  customer          Profile?       @relation("CustomerEscrows", fields: [customerId], references: [id])
+  order             Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  service           Service        @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  vendor            Profile        @relation("VendorEscrows", fields: [vendorId], references: [id], onDelete: Cascade)
 
   @@map("service_escrows")
 }
 
 model EscrowAction {
-  id          String     @id @default(cuid())
-  escrowId    String     @map("escrow_id")
-  actionType  ActionType @map("action_type")
-  performedBy String?    @map("performed_by")
+  id          String        @id @default(cuid())
+  escrowId    String        @map("escrow_id")
+  actionType  ActionType    @map("action_type")
+  performedBy String?       @map("performed_by")
   reason      String?
   metadata    Json?
-  createdAt   DateTime   @default(now()) @map("created_at")
-
-  // Relations
-  escrow    ServiceEscrow @relation(fields: [escrowId], references: [id], onDelete: Cascade)
-  performer Profile?      @relation("PerformedActions", fields: [performedBy], references: [id])
+  createdAt   DateTime      @default(now()) @map("created_at")
+  escrow      ServiceEscrow @relation(fields: [escrowId], references: [id], onDelete: Cascade)
+  performer   Profile?      @relation("PerformedActions", fields: [performedBy], references: [id])
 
   @@map("escrow_actions")
+}
+
+model PaymentVerificationQueue {
+  id            String             @id @default(cuid())
+  packageId     Int                @map("package_id")
+  orderId       String             @map("order_id")
+  retailerId    String             @map("retailer_id")
+  transcode     String?
+  initiatedAt   DateTime           @default(now()) @map("initiated_at")
+  lastCheckedAt DateTime           @default(now()) @map("last_checked_at")
+  verifiedAt    DateTime?          @map("verified_at")
+  status        VerificationStatus @default(pending)
+  attempts      Int                @default(0)
+  maxAttempts   Int                @default(20) @map("max_attempts")
+  errorMessage  String?            @map("error_message")
+  order         Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  retailer      Profile            @relation("RetailerVerifications", fields: [retailerId], references: [id], onDelete: Cascade)
+
+  @@index([status, lastCheckedAt])
+  @@index([packageId])
+  @@index([orderId])
+  @@index([retailerId])
+  @@map("payment_verification_queue")
+}
+
+enum user_role {
+  client
+  vendor
+  retailer
+  admin
+  manufacturer
+}
+
+enum order_status {
+  pending
+  processing
+  shipped
+  delivered
+  cancelled
+  pending_confirmation
+  confirmed
+  completed
+}
+
+enum order_status_enhanced {
+  pending
+  paid
+  processing
+  shipped
+  delivered
+  completed
+  cancelled
+  refunded
+  disputed
+}
+
+enum order_status_new {
+  pending
+  paid
+  processing
+  fulfilled
+  cancelled
+}
+
+enum payment_status {
+  pending
+  processing
+  completed
+  failed
+  refunded
+}
+
+enum payment_provider {
+  stripe
+  paystack
+  mpesa
+}
+
+enum booking_status {
+  pending
+  confirmed
+  completed
+  cancelled
+  rejected
+}
+
+enum appointment_status_enhanced {
+  pending
+  confirmed
+  in_progress
+  completed
+  client_confirmed
+  cancelled
+  no_show
+  disputed
+}
+
+enum shipment_status {
+  pending
+  dispatched
+  in_transit
+  out_for_delivery
+  delivered
+  failed_delivery
+  returned
+}
+
+enum commission_source {
+  product
+  service
+}
+
+enum onboarding_status {
+  pending
+  in_progress
+  submitted
+  approved
+  rejected
+  revision_requested
+}
+
+enum onboarding_field_type {
+  text
+  textarea
+  select
+  file
+  email
+  phone
+  url
+  rich_text
 }
 
 enum EscrowStatus {
@@ -1292,32 +1230,6 @@ enum ActionType {
   admin_refunded
   auto_released
   dispute_resolved
-}
-
-// Pick Up Mtaani Payment Verification Queue
-model PaymentVerificationQueue {
-  id            String             @id @default(cuid())
-  packageId     Int                @map("package_id")
-  orderId       String             @map("order_id")
-  retailerId    String             @map("retailer_id")
-  transcode     String? // M-Pesa transaction code if known
-  initiatedAt   DateTime           @default(now()) @map("initiated_at")
-  lastCheckedAt DateTime           @default(now()) @map("last_checked_at")
-  verifiedAt    DateTime?          @map("verified_at")
-  status        VerificationStatus @default(pending)
-  attempts      Int                @default(0)
-  maxAttempts   Int                @default(20) @map("max_attempts") // 20 attempts * 30s = 10 minutes
-  errorMessage  String?            @map("error_message")
-
-  // Relations
-  order    Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  retailer Profile @relation("RetailerVerifications", fields: [retailerId], references: [id], onDelete: Cascade)
-
-  @@index([status, lastCheckedAt])
-  @@index([packageId])
-  @@index([orderId])
-  @@index([retailerId])
-  @@map("payment_verification_queue")
 }
 
 enum VerificationStatus {

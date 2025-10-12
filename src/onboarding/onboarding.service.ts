@@ -953,4 +953,8 @@ export class OnboardingService {
 
     return true
   }
+
+  async getUserHistory(userId: string) {
+    return this.onboardingHistoryService.getUserHistory(userId);
+  }
 }

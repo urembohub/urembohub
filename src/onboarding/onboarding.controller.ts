@@ -168,6 +168,17 @@ export class OnboardingController {
     return this.onboardingService.getUsersByOnboardingStatus(status);
   }
 
+  // History Management (Admin only)
+  @UseGuards(JwtAuthGuard)
+  @Get('history/:userId')
+  async getUserHistory(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Request() req
+  ) {
+    // TODO: Add admin role check
+    return this.onboardingService.getUserHistory(userId);
+  }
+
   // Public endpoints for role-based requirements
   @Get('requirements/public/:role')
   async getPublicRequirementsByRole(@Param('role') role: user_role) {
