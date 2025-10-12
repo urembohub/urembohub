@@ -31,6 +31,7 @@ import { UploadModule } from "./upload/upload.module"
 import { PaystackModule } from "./paystack/paystack.module"
 import { AgoraModule } from "./agora/agora.module"
 import { SupabaseModule } from "./supabase/supabase.module"
+import { PickupMtaaniModule } from "./pickup-mtaani/pickup-mtaani.module"
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { SupabaseModule } from "./supabase/supabase.module"
     PaystackModule,
     AgoraModule,
     SupabaseModule,
+    PickupMtaaniModule,
   ],
   controllers: [AppController],
   providers: [AppService],
