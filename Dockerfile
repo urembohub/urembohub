@@ -1,7 +1,7 @@
 # Multi-stage build for NestJS Backend with Prisma
 
 # Stage 1: Dependencies
-FROM node:18-slim AS deps
+FROM node:20-slim AS deps
 
 WORKDIR /app
 
@@ -19,7 +19,7 @@ RUN npm ci
 RUN npx prisma generate
 
 # Stage 2: Build
-FROM node:18-slim AS builder
+FROM node:20-slim AS builder
 
 WORKDIR /app
 
@@ -36,14 +36,14 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Generate Prisma Clien
+# Generate Prisma Client
 RUN npx prisma generate
 
 # Build NestJS application
 RUN npm run build
 
 # Stage 3: Production
-FROM node:18-slim AS runner
+FROM node:20-slim AS runner
 
 WORKDIR /app
 
