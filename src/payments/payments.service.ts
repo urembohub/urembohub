@@ -993,6 +993,7 @@ export class PaymentsService {
       )
       console.log("💳 [PAYMENT_CALLBACK] Payment Reference:", reference)
       console.log("💳 [PAYMENT_CALLBACK] Timestamp:", new Date().toISOString())
+      console.log("💳 [PAYMENT_CALLBACK] Server URL:", process.env.API_BASE_URL || "http://localhost:3000")
 
       // Verify payment with Paystack
       console.log(

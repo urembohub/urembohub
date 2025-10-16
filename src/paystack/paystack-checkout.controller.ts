@@ -39,8 +39,19 @@ export class PaystackCheckoutController {
     @Body() payload: any,
     @Headers('x-paystack-signature') signature: string,
   ) {
-    this.logger.log('Received Paystack webhook');
-    return await this.paystackCheckoutService.handleWebhook(payload, signature);
+    this.logger.log('🔔 [WEBHOOK] Received Paystack webhook');
+    this.logger.log('🔔 [WEBHOOK] Payload:', JSON.stringify(payload, null, 2));
+    this.logger.log('🔔 [WEBHOOK] Signature:', signature);
+    this.logger.log('🔔 [WEBHOOK] Timestamp:', new Date().toISOString());
+    
+    try {
+      const result = await this.paystackCheckoutService.handleWebhook(payload, signature);
+      this.logger.log('🔔 [WEBHOOK] Webhook processed successfully:', result);
+      return result;
+    } catch (error) {
+      this.logger.error('🔔 [WEBHOOK] Webhook processing failed:', error);
+      throw error;
+    }
   }
 
   @Get('webhook')
