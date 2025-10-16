@@ -26,11 +26,11 @@ export class PackageTrackingQueueService {
   /**
    * Add a package tracking job to the queue
    * @param data Package tracking job data
-   * @param delay Delay in milliseconds before processing (default: 5 minutes)
+   * @param delay Delay in milliseconds before processing (default: 30 seconds for demo)
    */
   async addPackageTrackingJob(
     data: PackageTrackingJobData,
-    delay: number = 5 * 60 * 1000, // 5 minutes default delay
+    delay: number = 30 * 1000, // 30 seconds default delay for demo
   ): Promise<void> {
     try {
       const job = await this.packageTrackingQueue.add(

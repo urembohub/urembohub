@@ -103,10 +103,10 @@ export class PackageTrackingProcessor {
         );
 
         // Check less frequently since payment is done
-        const nextCheckDelay = 15 * 60 * 1000; // 15 minutes
+        const nextCheckDelay = 60 * 1000; // 1 minute for demo
         
         this.logger.log(
-          `⏰ [PACKAGE_TRACKING] Package ${packageId} ready for shipping, next check in ${Math.round(nextCheckDelay / 60000)} minutes`
+          `⏰ [PACKAGE_TRACKING] Package ${packageId} ready for shipping, next check in ${Math.round(nextCheckDelay / 1000)} seconds`
         );
 
         // Reschedule the job with longer delay
@@ -116,7 +116,7 @@ export class PackageTrackingProcessor {
         const nextCheckDelay = this.calculateNextCheckDelay(currentState, job.attemptsMade);
         
         this.logger.log(
-          `⏰ [PACKAGE_TRACKING] Package ${packageId} in progress (${currentState}), next check in ${Math.round(nextCheckDelay / 60000)} minutes`
+          `⏰ [PACKAGE_TRACKING] Package ${packageId} in progress (${currentState}), next check in ${Math.round(nextCheckDelay / 1000)} seconds`
         );
 
         // Reschedule the job
@@ -194,17 +194,17 @@ export class PackageTrackingProcessor {
    * Calculate delay for next check based on current state
    */
   private calculateNextCheckDelay(currentState: string, attemptCount: number): number {
-    // Base delay: 10-15 minutes for all states
-    const baseDelay = 10 * 60 * 1000; // 10 minutes
-    const randomExtra = Math.floor(Math.random() * 5 * 60 * 1000); // 0-5 minutes random
+    // Base delay: 30-60 seconds for demo purposes
+    const baseDelay = 30 * 1000; // 30 seconds
+    const randomExtra = Math.floor(Math.random() * 30 * 1000); // 0-30 seconds random
     
     // For early states, check more frequently
     if (currentState === 'request' || currentState === 'pending') {
-      return 5 * 60 * 1000; // 5 minutes for initial states
+      return 30 * 1000; // 30 seconds for initial states
     }
     
     // For active delivery states, use standard interval
-    return baseDelay + randomExtra; // 10-15 minutes
+    return baseDelay + randomExtra; // 30-60 seconds
   }
 
   /**

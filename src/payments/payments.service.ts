@@ -1910,7 +1910,7 @@ export class PaymentsService {
               retailerName: group.retailer.businessName || group.retailer.fullName,
               customerEmail: order.customerEmail,
               customerName: client?.fullName || 'Customer',
-            }, 5 * 60 * 1000) // Start tracking after 5 minutes
+            }, 30 * 1000) // Start tracking after 30 seconds for demo
 
             console.log(`📦 [PACKAGE_TRACKING] Added tracking job for package ${packageResponse.data.id}`)
           } catch (error) {

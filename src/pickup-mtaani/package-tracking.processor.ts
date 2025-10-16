@@ -117,8 +117,8 @@ export class PackageTrackingProcessor {
 
       // Check if we should schedule another tracking job
       if (this.shouldContinueTracking(packageData.state)) {
-        // Schedule next check in 5 minutes
-        await this.scheduleNextTracking(job.data, 5 * 60 * 1000);
+        // Schedule next check in 30 seconds for demo
+        await this.scheduleNextTracking(job.data, 30 * 1000);
       } else {
         this.logger.log(`📦 [PACKAGE_TRACKING] Package ${packageId} reached final state: ${packageData.state}`);
       }
