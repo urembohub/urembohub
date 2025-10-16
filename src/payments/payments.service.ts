@@ -74,6 +74,23 @@ export class PaymentsService {
   }
 
   /**
+   * Normalize tracking link to ensure it has proper protocol
+   * @param trackingLink The tracking link from Pick Up Mtaani
+   * @returns Normalized tracking link with https:// protocol
+   */
+  private normalizeTrackingLink(trackingLink: string | undefined): string | undefined {
+    if (!trackingLink) return undefined;
+    
+    // If it already has a protocol, return as is
+    if (trackingLink.startsWith('http://') || trackingLink.startsWith('https://')) {
+      return trackingLink;
+    }
+    
+    // Add https:// protocol
+    return `https://${trackingLink}`;
+  }
+
+  /**
    * Initialize payment with Paystack Payment Groups for multi-vendor orders
    */
   async initializePaymentGroup(
@@ -1121,7 +1138,7 @@ export class PaymentsService {
         Array.from(vendors)
       )
 
-      // Update order status
+      // Update order status to paid
       console.log("💳 [PAYMENT_CALLBACK] Step 3: Updating order status...")
       await this.prisma.order.update({
         where: { id: order.id },
@@ -1640,7 +1657,11 @@ export class PaymentsService {
           "📦 [PICKUP_MTAANI] No product items to ship, skipping package creation"
         )
         console.log("📦 [PICKUP_MTAANI] (This is likely a services-only order)")
-        return
+        return {
+          success: true,
+          failedPackages: [],
+          totalPackages: 0
+        }
       }
 
       console.log(
@@ -1695,7 +1716,11 @@ export class PaymentsService {
         console.error(
           "❌ [PICKUP_MTAANI] Order has no userId - cannot get client shipping details"
         )
-        return
+        return {
+          success: false,
+          failedPackages: [],
+          totalPackages: 0
+        }
       }
 
       const client = await this.prisma.profile.findUnique({
@@ -1713,7 +1738,11 @@ export class PaymentsService {
         console.error(
           "❌ [PICKUP_MTAANI] Client must configure shipping in their profile"
         )
-        return
+        return {
+          success: false,
+          failedPackages: [],
+          totalPackages: 0
+        }
       }
 
       const clientDeliveryDetails = client.deliveryDetails as any
@@ -1721,7 +1750,11 @@ export class PaymentsService {
 
       if (!receiverAgentId) {
         console.error("❌ [PICKUP_MTAANI] Client missing receiver agent ID")
-        return
+        return {
+          success: false,
+          failedPackages: [],
+          totalPackages: 0
+        }
       }
 
       console.log(`📦 [PICKUP_MTAANI] Client: ${client.fullName || "Unknown"}`)
@@ -1857,7 +1890,7 @@ export class PaymentsService {
             packageName: packageName,
             status: packageResponse.data.state,
             paymentStatus: packageResponse.data.payment_status,
-            trackingLink: packageResponse.data.trackingLink,
+            trackingLink: this.normalizeTrackingLink(packageResponse.data.trackingLink),
             createdAt: packageResponse.data.createdAt,
             items: group.items.map((item) => ({
               productId: item.productId,
@@ -2028,21 +2061,52 @@ export class PaymentsService {
   }
 
   /**
+   * Update order status when retailer pays for shipping
+   * This should be called when package payment_status changes to 'paid'
+   */
+  async updateOrderStatusOnShippingPayment(orderId: string, packageId: number) {
+    try {
+      console.log(`📦 [SHIPPING_PAYMENT] Updating order status for shipping payment: Order ${orderId}, Package ${packageId}`)
+      
+      // Get the order
+      const order = await this.prisma.order.findUnique({
+        where: { id: orderId },
+        select: { id: true, status: true, shippingAddress: true }
+      })
+
+      if (!order) {
+        console.error(`❌ [SHIPPING_PAYMENT] Order ${orderId} not found`)
+        return
+      }
+
+      // Update order status to confirmed (ready for shipping)
+      await this.prisma.order.update({
+        where: { id: orderId },
+        data: { status: 'confirmed' }
+      })
+
+      console.log(`✅ [SHIPPING_PAYMENT] Order ${orderId} status updated to confirmed`)
+    } catch (error) {
+      console.error(`❌ [SHIPPING_PAYMENT] Error updating order status:`, error)
+    }
+  }
+
+  /**
    * Update order status based on package creation results
    */
   private async updateOrderStatusBasedOnPackages(order: any, packageResults: { success: boolean; failedPackages: any[]; totalPackages: number }) {
     try {
-      let newStatus = 'processing' // Default status
+      let newStatus = 'processing' // Default status after package creation
       
       if (packageResults.totalPackages === 0) {
-        // No packages to create (services-only order)
-        newStatus = 'processing'
+        // No packages to create (services-only order) - keep as paid
+        newStatus = 'paid'
       } else if (packageResults.success) {
-        // All packages created successfully
+        // All packages created successfully - now processing (waiting for retailer to pay shipping)
         newStatus = 'processing'
       } else if (packageResults.failedPackages.length === packageResults.totalPackages) {
         // All packages failed
-        newStatus = 'shipping_failed'
+        newStatus = 'pending_confirmation'
       } else {
         // Some packages failed, some succeeded
         newStatus = 'partially_shipped'
@@ -2153,7 +2217,7 @@ export class PaymentsService {
         try {
           // Get retailer profile to get business ID
           const retailerProfile = await this.prisma.profile.findUnique({
-            where: { id: order.retailerId },
+            where: { id: firstPackage.retailerId },
             select: { pickupMtaaniBusinessDetails: true }
           })
 
@@ -2162,10 +2226,11 @@ export class PaymentsService {
             const businessId = businessDetails.businessId.toString()
             
             // Fetch fresh package data from Pick Up Mtaani
-            const freshPackageData = await this.pickupMtaaniService.getPackageByIdentifier(
+            const freshPackageResponse = await this.pickupMtaaniService.getPackageStatus(
               firstPackage.packageId, 
               businessId
             )
+            const freshPackageData = freshPackageResponse?.data
 
             if (freshPackageData) {
               console.log(`✅ [PACKAGE_STATUS] Fresh package data fetched:`, {
@@ -2173,6 +2238,12 @@ export class PaymentsService {
                 paymentStatus: freshPackageData.payment_status,
                 trackingLink: freshPackageData.trackingLink
               })
+
+              // Update the package in shippingAddress with fresh data
+              firstPackage.status = freshPackageData.state
+              firstPackage.paymentStatus = freshPackageData.payment_status
+              firstPackage.trackingLink = freshPackageData.trackingLink
+              firstPackage.updatedAt = freshPackageData.createdAt
 
               // Update the order with fresh package tracking data
               await this.prisma.order.update({
@@ -2183,14 +2254,12 @@ export class PaymentsService {
                   packageReceiptNo: freshPackageData.receipt_no,
                   packageTrackingLink: freshPackageData.trackingLink,
                   packageTrackingHistory: freshPackageData.agent_package_tracks?.descriptions || [],
+                  shippingAddress: {
+                    ...shippingAddress,
+                    pickupMtaaniPackages: packages,
+                  },
                 }
               })
-
-              // Update the package in shippingAddress with fresh data
-              firstPackage.status = freshPackageData.state
-              firstPackage.paymentStatus = freshPackageData.payment_status
-              firstPackage.trackingLink = freshPackageData.trackingLink
-              firstPackage.updatedAt = freshPackageData.createdAt
 
               console.log(`✅ [PACKAGE_STATUS] Order updated with fresh package data`)
             } else {

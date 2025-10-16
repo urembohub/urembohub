@@ -471,16 +471,16 @@ export class PaymentVerificationService {
         },
       })
 
-      // Update order status to ready_for_shipping when package payment is verified
+      // Update order status to confirmed when package payment is verified
       await this.prisma.order.update({
         where: { id: orderId },
         data: {
-          status: 'ready_for_shipping',
+          status: 'confirmed',
         },
       })
 
       this.logger.log(
-        `✅ [UPDATE] Updated package ${packageId} in order ${orderId} and set status to ready_for_shipping`
+        `✅ [UPDATE] Updated package ${packageId} in order ${orderId} and set status to confirmed`
       )
     } catch (error) {
       this.logger.error(

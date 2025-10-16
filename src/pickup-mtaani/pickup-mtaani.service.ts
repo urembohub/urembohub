@@ -97,6 +97,23 @@ export class PickupMtaaniService {
   }
 
   /**
+   * Normalize tracking link to ensure it has proper protocol
+   * @param trackingLink The tracking link from Pick Up Mtaani
+   * @returns Normalized tracking link with https:// protocol
+   */
+  private normalizeTrackingLink(trackingLink: string | undefined): string | undefined {
+    if (!trackingLink) return undefined;
+    
+    // If it already has a protocol, return as is
+    if (trackingLink.startsWith('http://') || trackingLink.startsWith('https://')) {
+      return trackingLink;
+    }
+    
+    // Add https:// protocol
+    return `https://${trackingLink}`;
+  }
+
+  /**
    * Create a shipping package for retailer product orders
    * @param packageData Package creation details
    * @param businessId Pickup Mtaani business ID for the retailer
@@ -280,6 +297,10 @@ export class PickupMtaaniService {
       this.logger.log(
         `✅ Package status retrieved: ${response.data.data?.state}`
       )
+      
+      // Debug: Log the complete response to see what fields are available
+      this.logger.log(`🔍 [PACKAGE_STATUS] Complete response:`, JSON.stringify(response.data, null, 2))
+      
       return response.data
     } catch (error) {
       this.logger.error(
@@ -433,10 +454,14 @@ export class PickupMtaaniService {
    */
   async getPackageByIdentifier(identifier: string | number, businessId: string): Promise<any> {
     try {
-      // First try to get from all packages
-      const allPackages = await this.getAllBusinessPackages(businessId)
+      // Try direct fetch first to get complete package details
+      const packageResponse = await this.getPackageStatus(Number(identifier), businessId)
+      if (packageResponse?.data) {
+        return packageResponse.data
+      }
 
-      // Search by package ID or receipt number
+      // If direct fetch fails, try searching in all packages as fallback
+      const allPackages = await this.getAllBusinessPackages(businessId)
       const packageData = allPackages.find(
         (pkg) =>
           pkg.id === identifier ||
@@ -444,12 +469,7 @@ export class PickupMtaaniService {
           pkg.id === Number(identifier)
       )
 
-      if (packageData) {
-        return packageData
-      }
-
-      // If not found in unpaid packages, try direct fetch
-      return await this.getPackageStatus(Number(identifier), businessId)
+      return packageData || null
     } catch (error) {
       this.logger.error(
         `❌ Failed to fetch package ${identifier}:`,

@@ -16,6 +16,23 @@ export class PackageTrackingProcessor {
     private emailService: EmailService,
   ) {}
 
+  /**
+   * Normalize tracking link to ensure it has proper protocol
+   * @param trackingLink The tracking link from Pick Up Mtaani
+   * @returns Normalized tracking link with https:// protocol
+   */
+  private normalizeTrackingLink(trackingLink: string | undefined): string | undefined {
+    if (!trackingLink) return undefined;
+    
+    // If it already has a protocol, return as is
+    if (trackingLink.startsWith('http://') || trackingLink.startsWith('https://')) {
+      return trackingLink;
+    }
+    
+    // Add https:// protocol
+    return `https://${trackingLink}`;
+  }
+
   @Process('track-package')
   async handlePackageTracking(job: Job<PackageTrackingJobData>) {
     const { orderId, packageId, businessId, retailerId, retailerName, customerEmail, customerName } = job.data;
@@ -56,7 +73,7 @@ export class PackageTrackingProcessor {
         paymentStatus: paymentStatus,
         packageTrackingId: trackingId,
         packageReceiptNo: receiptNo,
-        packageTrackingLink: trackingLink,
+        packageTrackingLink: this.normalizeTrackingLink(trackingLink),
       }, packageStatusResponse.data); // Pass full response for history
 
       // Check if package is in a final state
@@ -143,10 +160,12 @@ export class PackageTrackingProcessor {
       // Check if payment is verified and update order status to ready_for_shipping
       const isPaymentVerified = packageData.paymentStatus === 'paid';
       let orderStatusUpdate = {};
+      let paymentStatusUpdate = {};
       
       if (isPaymentVerified) {
         orderStatusUpdate = { status: 'ready_for_shipping' };
-        this.logger.log(`🚚 [PACKAGE_TRACKING] Payment verified for order ${orderId}, updating status to ready_for_shipping`);
+        paymentStatusUpdate = { paymentStatus: 'paid' }; // Update payment status to paid when Pick Up Mtaani confirms
+        this.logger.log(`🚚 [PACKAGE_TRACKING] Payment verified for order ${orderId}, updating status to ready_for_shipping and payment status to paid`);
       }
 
       await this.prisma.order.update({
@@ -160,6 +179,7 @@ export class PackageTrackingProcessor {
           packageTrackingHistory: trackingHistory, // Store full tracking history
           deliveryFee: fullPackageResponse.delivery_fee || null,
           ...orderStatusUpdate, // Include order status update if payment is verified
+          ...paymentStatusUpdate, // Include payment status update if payment is verified
         },
       });
 

@@ -274,7 +274,7 @@ export class PaystackCheckoutService {
             where: { id: order.id },
             data: {
               status: paymentData.status === 'success' ? 'confirmed' : 'cancelled',
-              paymentStatus: paymentData.status === 'success' ? 'paid' : 'failed',
+              paymentStatus: paymentData.status === 'success' ? 'processing' : 'failed',
               paymentMethod: paymentData.channel,
               paymentAmount: paymentData.amount / 100, // Convert from kobo
               paidAt: paymentData.status === 'success' ? new Date() : null,
@@ -1028,7 +1028,7 @@ export class PaystackCheckoutService {
         where: { id: order.id },
         data: {
           status: 'paid', // Use 'paid' status after payment confirmation
-          paymentStatus: 'paid',
+          paymentStatus: 'processing',
           paymentMethod: 'paystack',
           paymentAmount: amount,
           paidAt: new Date(),

@@ -403,8 +403,36 @@ export class OrdersService {
       orderBy: { createdAt: 'desc' },
     });
 
+    // Transform orders to include package tracking data from shippingAddress
+    const transformedOrders = orders.map(order => {
+      const shippingAddress = order.shippingAddress as any;
+      const packages = shippingAddress?.pickupMtaaniPackages || [];
+      
+      // Get package data for this user's orders
+      const userPackages = packages.filter((pkg: any) => 
+        // Filter packages that belong to this order
+        pkg.orderId === order.id
+      );
 
-    return orders;
+      return {
+        ...order,
+        // Include package tracking fields for backward compatibility
+        packageStatus: order.packageStatus,
+        packageTrackingId: order.packageTrackingId,
+        packageReceiptNo: order.packageReceiptNo,
+        packageTrackingLink: order.packageTrackingLink,
+        packageTrackingHistory: order.packageTrackingHistory,
+        // Include all packages for this order
+        packages: userPackages,
+        // Keep original shippingAddress for compatibility
+        shippingAddress: {
+          ...shippingAddress,
+          pickupMtaaniPackages: packages,
+        },
+      };
+    });
+
+    return transformedOrders;
   }
 
   async confirmOrder(id: string, userId: string, userRole: string) {
