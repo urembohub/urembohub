@@ -1,12 +1,12 @@
 # Multi-stage build for NestJS Backend with Prisma
 
 # Stage 1: Dependencies
-FROM node:18-alpine AS deps
+FROM node:18-slim AS deps
 
 WORKDIR /app
 
 # Install OpenSSL for Prisma
-RUN apk add --no-cache openssl
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 # Copy package files
 COPY package*.json ./
@@ -19,12 +19,12 @@ RUN npm ci
 RUN npx prisma generate
 
 # Stage 2: Build
-FROM node:18-alpine AS builder
+FROM node:18-slim AS builder
 
 WORKDIR /app
 
 # Install OpenSSL for Prisma
-RUN apk add --no-cache openssl
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 # Copy package files and prisma
 COPY package*.json ./
@@ -43,12 +43,12 @@ RUN npx prisma generate
 RUN npm run build
 
 # Stage 3: Production
-FROM node:18-alpine AS runner
+FROM node:18-slim AS runner
 
 WORKDIR /app
 
-# Install OpenSSL for Prisma
-RUN apk add --no-cache openssl
+# Install OpenSSL for Prisma and crypto dependencies
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 # Note: Environment variables are provided via docker-compose env_file
 # All required env vars should be defined in .env file
