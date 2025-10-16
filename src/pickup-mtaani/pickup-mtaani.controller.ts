@@ -1,4 +1,4 @@
-import { Controller, Get, Post, UseGuards, Request, Logger, Body } from '@nestjs/common';
+import { Controller, Get, Post, UseGuards, Request, Logger, Body, Param } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { PickupMtaaniService } from './pickup-mtaani.service';
@@ -51,21 +51,33 @@ export class PickupMtaaniController {
       }
 
       // Update user profile with business details
+      const businessDetails = {
+        businessId: result.data.id,
+        businessName: result.data.name,
+        phoneNumber: result.data.phone_number,
+        categoryId: result.data.business_categories.id,
+        categoryName: result.data.business_categories.name,
+        createdAt: result.data.createdAt,
+      };
+
+      this.logger.log(`🔍 [BUSINESS] Storing business details:`, JSON.stringify(businessDetails, null, 2));
+
       await this.prisma.profile.update({
         where: { id: userId },
         data: {
-          pickupMtaaniBusinessDetails: {
-            businessId: result.data.id,
-            businessName: result.data.name,
-            phoneNumber: result.data.phone_number,
-            categoryId: result.data.business_categories.id,
-            categoryName: result.data.business_categories.name,
-            createdAt: result.data.createdAt,
-          },
+          pickupMtaaniBusinessDetails: businessDetails,
         },
       });
 
       this.logger.log(`✅ [BUSINESS] Business created and profile updated for user: ${userId}`);
+
+      // Verify the data was stored correctly
+      const updatedProfile = await this.prisma.profile.findUnique({
+        where: { id: userId },
+        select: { pickupMtaaniBusinessDetails: true }
+      });
+
+      this.logger.log(`🔍 [BUSINESS] Verification - stored business details:`, JSON.stringify(updatedProfile?.pickupMtaaniBusinessDetails, null, 2));
 
       return {
         success: true,
@@ -109,6 +121,95 @@ export class PickupMtaaniController {
       return {
         success: false,
         error: 'Failed to fetch business categories',
+      };
+    }
+  }
+
+  /**
+   * Initiate package payment (STK push)
+   */
+  @Post('packages/:packageId/pay')
+  async initiatePackagePayment(
+    @Request() req,
+    @Param('packageId') packageId: string,
+    @Body() paymentData: {
+      orderId: string;
+      phone: string;
+      businessId: number;
+      type: string;
+    }
+  ) {
+    try {
+      const userId = req.user.sub;
+      this.logger.log(`💳 [PACKAGE_PAYMENT] Initiating payment for package ${packageId} by user ${userId}`);
+
+      // Validate required fields
+      if (!paymentData.phone || !paymentData.businessId || !paymentData.type) {
+        return {
+          success: false,
+          error: 'Missing required payment data (phone, businessId, type)',
+        };
+      }
+
+      // Get retailer's business details
+      const retailerProfile = await this.prisma.profile.findUnique({
+        where: { id: userId },
+        select: {
+          pickupMtaaniBusinessDetails: true,
+        },
+      });
+
+      if (!retailerProfile?.pickupMtaaniBusinessDetails) {
+        return {
+          success: false,
+          error: 'Retailer has not completed Pickup Mtaani business setup',
+        };
+      }
+
+      const businessDetails = retailerProfile.pickupMtaaniBusinessDetails as any;
+      if (businessDetails.businessId !== paymentData.businessId) {
+        return {
+          success: false,
+          error: 'Business ID mismatch',
+        };
+      }
+
+      // Call Pick Up Mtaani's STK push API
+      this.logger.log(`💳 [PACKAGE_PAYMENT] Initiating STK push via Pick Up Mtaani API`);
+      
+      const stkPushResponse = await this.pickupMtaaniService.initiateStkPush({
+        packages: [{
+          id: parseInt(packageId),
+          type: paymentData.type
+        }],
+        phone: paymentData.phone,
+        businessId: paymentData.businessId
+      });
+
+      if (!stkPushResponse.success) {
+        return {
+          success: false,
+          error: stkPushResponse.error || 'Failed to initiate STK push',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Payment request sent successfully. Please check your phone for M-Pesa prompt.',
+        data: {
+          packageId: parseInt(packageId),
+          phone: paymentData.phone,
+          businessId: paymentData.businessId,
+          type: paymentData.type,
+          stkResponse: stkPushResponse.data
+        }
+      };
+
+    } catch (error) {
+      this.logger.error('❌ [PACKAGE_PAYMENT] Error initiating payment:', error);
+      return {
+        success: false,
+        error: 'Failed to initiate package payment',
       };
     }
   }
@@ -184,7 +285,7 @@ export class PickupMtaaniController {
               select: {
                 id: true,
                 name: true,
-                },
+              },
             },
           },
         },
@@ -231,6 +332,8 @@ export class PickupMtaaniController {
             })),
             orderId: order.id,
           orderStatus: order.status,
+          businessId: businessDetails.businessId, // Add business ID to package data
+          hasBusinessId: true, // Add flag to indicate business ID is available
           });
         }
       }

@@ -232,8 +232,12 @@ export class PickupMtaaniService {
    */
   validateRetailerBusinessId(retailerProfile: any): { valid: boolean; businessId?: string; error?: string } {
     try {
+      this.logger.log(`🔍 [BUSINESS_VALIDATION] Validating business ID for retailer: ${retailerProfile.id}`)
+      this.logger.log(`🔍 [BUSINESS_VALIDATION] Retailer profile:`, JSON.stringify(retailerProfile, null, 2))
+      
       // Check if pickupMtaaniBusinessDetails exists
       if (!retailerProfile.pickupMtaaniBusinessDetails) {
+        this.logger.warn(`⚠️ [BUSINESS_VALIDATION] No pickupMtaaniBusinessDetails found for retailer: ${retailerProfile.id}`)
         return {
           valid: false,
           error: 'Retailer has not completed Pickup Mtaani business setup'
@@ -241,11 +245,13 @@ export class PickupMtaaniService {
       }
 
       const businessDetails = retailerProfile.pickupMtaaniBusinessDetails
+      this.logger.log(`🔍 [BUSINESS_VALIDATION] Business details:`, JSON.stringify(businessDetails, null, 2))
       
       // Check for businessId or id field
       const businessId = businessDetails.businessId || businessDetails.id
       
       if (!businessId) {
+        this.logger.warn(`⚠️ [BUSINESS_VALIDATION] No businessId found in business details for retailer: ${retailerProfile.id}`)
         return {
           valid: false,
           error: 'Pickup Mtaani business ID not found in retailer profile'
@@ -254,12 +260,14 @@ export class PickupMtaaniService {
 
       // Validate business ID format (should be a number)
       if (typeof businessId !== 'number' && !/^\d+$/.test(String(businessId))) {
+        this.logger.warn(`⚠️ [BUSINESS_VALIDATION] Invalid business ID format: ${businessId} for retailer: ${retailerProfile.id}`)
         return {
           valid: false,
           error: 'Invalid Pickup Mtaani business ID format'
         }
       }
 
+      this.logger.log(`✅ [BUSINESS_VALIDATION] Valid business ID found: ${businessId} for retailer: ${retailerProfile.id}`)
       return {
         valid: true,
         businessId: String(businessId)
@@ -693,6 +701,61 @@ export class PickupMtaaniService {
       return {
         success: false,
         error: error.response?.data?.message || "Failed to create business",
+      }
+    }
+  }
+
+  /**
+   * Initiate STK push payment for package delivery
+   */
+  async initiateStkPush(paymentData: {
+    packages: Array<{ id: number; type: string }>;
+    phone: string;
+    businessId: number;
+  }): Promise<{
+    success: boolean
+    data?: any
+    error?: string
+  }> {
+    try {
+      this.logger.log(`💳 [STK_PUSH] Initiating STK push for packages:`, paymentData.packages.map(p => p.id).join(', '))
+      this.logger.log(`💳 [STK_PUSH] Phone: ${paymentData.phone}`)
+      this.logger.log(`💳 [STK_PUSH] Business ID: ${paymentData.businessId}`)
+
+      const url = `${this.baseUrl}/payment/pay-delivery-stk?b_id=${paymentData.businessId}`
+
+      this.logger.log(`💳 [STK_PUSH] API URL: ${url}`)
+
+      const response = await axios.put(url, {
+        packages: paymentData.packages,
+        phone: paymentData.phone
+      }, {
+        headers: {
+          accept: "application/json",
+          "Content-Type": "application/json",
+          "apiKey": this.apiKey,
+        },
+        timeout: 30000, // 30 second timeout for STK push
+      })
+
+      this.logger.log(`✅ [STK_PUSH] STK push initiated successfully`)
+      this.logger.log(`✅ [STK_PUSH] Response:`, JSON.stringify(response.data, null, 2))
+
+      return { 
+        success: true, 
+        data: response.data 
+      }
+    } catch (error) {
+      this.logger.error(`❌ [STK_PUSH] Failed to initiate STK push:`, error)
+      this.logger.error(`❌ [STK_PUSH] Error details:`, {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      })
+      
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message || "Failed to initiate STK push",
       }
     }
   }
