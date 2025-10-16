@@ -41,6 +41,9 @@ export class PickupMtaaniController {
       console.log(
         `📦 [GET_RETAILER_PACKAGES] Fetching packages for retailer: ${retailerId}`
       )
+      console.log(
+        `📦 [GET_RETAILER_PACKAGES] Target retailer ID type: ${typeof retailerId}, value: "${retailerId}"`
+      )
 
       if (!retailerId) {
         throw new Error(
@@ -48,22 +51,18 @@ export class PickupMtaaniController {
         )
       }
 
-      // Simplified query: Get all confirmed orders with order items
+      // Relaxed query: Get all orders with order items (except only truly cancelled ones)
       // We'll filter for retailer-specific packages in the processing logic
       const orders = await this.prisma.order.findMany({
         where: {
+          // Include all statuses except explicitly cancelled
           status: {
-            in: [
-              "paid",                    // Updated from "confirmed"
-              "ready_for_shipping",      // Updated from "processing"
-              "in_transit",              // New Pickup Mtaani state
-              "shipped",
-              "delivered",
-              "completed",
-              "cancelled",               // Include cancelled for completeness
-              "returned",                // Include returned for completeness
-            ],
+            not: "cancelled"
           },
+          // Only include orders that have order items (products)
+          orderItems: {
+            some: {}
+          }
         },
         include: {
           orderItems: {
@@ -80,6 +79,16 @@ export class PickupMtaaniController {
       console.log(
         `📦 [GET_RETAILER_PACKAGES] Found ${orders.length} total orders`
       )
+      
+      // Debug: Log all order statuses found
+      const statusCounts = orders.reduce((acc, order) => {
+        acc[order.status] = (acc[order.status] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+      console.log(`📦 [GET_RETAILER_PACKAGES] Order status breakdown:`, statusCounts);
+
+      // Debug: Log retailer order summary
+      console.log(`📦 [GET_RETAILER_PACKAGES] Found ${orders.length} total orders with order items`);
 
       // Filter for orders that have this retailer's products
       const retailerOrders = orders.filter((order) =>
@@ -89,8 +98,11 @@ export class PickupMtaaniController {
       console.log(
         `📦 [GET_RETAILER_PACKAGES] Filtered to ${retailerOrders.length} orders for retailer`
       )
+      
+      // Debug: Log retailer order summary
+      console.log(`📦 [GET_RETAILER_PACKAGES] Found ${retailerOrders.length} orders with products from this retailer`);
 
-      // Log orders with shippingAddress
+      // Debug: Log orders and their shipping address packages
       retailerOrders.forEach((order) => {
         const shippingAddress = order.shippingAddress as any
         const packages = shippingAddress?.pickupMtaaniPackages || []
@@ -100,9 +112,11 @@ export class PickupMtaaniController {
         if (packages.length > 0) {
           packages.forEach((pkg: any) => {
             console.log(
-              `📦 [GET_RETAILER_PACKAGES]   - Package: ${pkg.receiptNo}, Retailer: ${pkg.retailerId}`
+              `📦 [GET_RETAILER_PACKAGES]   - Package: ${pkg.receiptNo}, Retailer: ${pkg.retailerId}, PackageId: ${pkg.packageId}`
             )
           })
+        } else {
+          console.log(`📦 [GET_RETAILER_PACKAGES]   - No packages in shippingAddress for order ${order.id}`)
         }
       })
 
@@ -129,7 +143,28 @@ export class PickupMtaaniController {
       let allPickupMtaaniPackages: any[] = []
       if (businessIdValidation.valid) {
         // Only fetch packages if retailer has valid business ID
+        console.log(`📦 [GET_RETAILER_PACKAGES] Fetching packages from Pick Up Mtaani for business ID: ${businessIdValidation.businessId}`)
+        
+        // First try unpaid packages
         allPickupMtaaniPackages = await this.pickupMtaaniService.getAllBusinessPackages(businessIdValidation.businessId)
+        console.log(`📦 [GET_RETAILER_PACKAGES] Retrieved ${allPickupMtaaniPackages.length} unpaid packages from Pick Up Mtaani`)
+        
+        // If no unpaid packages found, try to get all packages (including paid ones)
+        if (allPickupMtaaniPackages.length === 0) {
+          console.log(`📦 [GET_RETAILER_PACKAGES] No unpaid packages found, trying to fetch all packages...`)
+          allPickupMtaaniPackages = await this.pickupMtaaniService.getAllBusinessPackagesIncludingPaid(businessIdValidation.businessId)
+          console.log(`📦 [GET_RETAILER_PACKAGES] Retrieved ${allPickupMtaaniPackages.length} total packages from Pick Up Mtaani`)
+        }
+        
+        // Debug: Log package details
+        allPickupMtaaniPackages.forEach((pkg, index) => {
+          console.log(`📦 [GET_RETAILER_PACKAGES] Pick Up Mtaani Package ${index + 1}:`, {
+            id: pkg.id,
+            receiptNo: pkg.receipt_no || pkg.receiptNo,
+            status: pkg.state || pkg.status,
+            businessId: pkg.business_id || pkg.businessId
+          });
+        });
       } else {
         console.log(`⚠️ [GET_RETAILER_PACKAGES] Retailer ${retailerId} has not completed Pickup Mtaani business setup`)
         console.log(`⚠️ [GET_RETAILER_PACKAGES] Error: ${businessIdValidation.error}`)
@@ -148,9 +183,12 @@ export class PickupMtaaniController {
         const packages = shippingAddress?.pickupMtaaniPackages || []
 
         // Filter packages for this retailer
-        const retailerSpecificPackages = packages.filter(
+        let retailerSpecificPackages = packages.filter(
           (pkg: any) => pkg.retailerId === retailerId
         )
+
+        // Only process orders that have actual Pick Up Mtaani packages
+        // No fallback to orders - only show real packages
 
         console.log(
           `📦 [GET_RETAILER_PACKAGES] Order ${order.id}: ${retailerSpecificPackages.length} packages for this retailer`
@@ -230,9 +268,13 @@ export class PickupMtaaniController {
         `📦 [GET_RETAILER_PACKAGES] Returning ${retailerPackages.length} packages total`
       )
 
-      // If no packages and business setup is incomplete, add a helpful message
-      if (retailerPackages.length === 0 && !businessIdValidation.valid) {
-        console.log(`ℹ️ [GET_RETAILER_PACKAGES] No packages found - retailer needs to complete Pickup Mtaani business setup`)
+      // If no packages found, log the reason
+      if (retailerPackages.length === 0) {
+        if (!businessIdValidation.valid) {
+          console.log(`ℹ️ [GET_RETAILER_PACKAGES] No packages found - retailer needs to complete Pickup Mtaani business setup`)
+        } else {
+          console.log(`ℹ️ [GET_RETAILER_PACKAGES] No packages found - no orders have Pick Up Mtaani packages created yet`)
+        }
       }
 
       return retailerPackages
@@ -537,5 +579,14 @@ export class PickupMtaaniController {
   @Post("business")
   async createBusiness(@Body() createBusinessDto: CreateBusinessDto) {
     return await this.pickupMtaaniService.createBusiness(createBusinessDto)
+  }
+
+  /**
+   * Debug endpoint to list all businesses
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get("debug/businesses")
+  async listAllBusinesses() {
+    return await this.pickupMtaaniService.listAllBusinesses()
   }
 }

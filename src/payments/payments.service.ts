@@ -1626,11 +1626,13 @@ export class PaymentsService {
         "📦 [PICKUP_MTAANI] ==========================================="
       )
       console.log("📦 [PICKUP_MTAANI] CREATING SHIPPING PACKAGES FOR RETAILERS")
-      console.log(
-        "📦 [PICKUP_MTAANI] ==========================================="
-      )
-      console.log("📦 [PICKUP_MTAANI] Order ID:", order.id)
-      console.log("📦 [PICKUP_MTAANI] Customer Email:", order.customerEmail)
+      console.log("📦 [PICKUP_MTAANI] ===========================================")
+      console.log(`📦 [PICKUP_MTAANI] Order ID: ${order.id}`)
+      console.log(`📦 [PICKUP_MTAANI] Order Status: ${order.status}`)
+      console.log(`📦 [PICKUP_MTAANI] Customer Email: ${order.customerEmail}`)
+      console.log(`📦 [PICKUP_MTAANI] Total Amount: ${order.totalAmount}`)
+      console.log(`📦 [PICKUP_MTAANI] Order Items Count: ${order.orderItems?.length || 0}`)
+      console.log("📦 [PICKUP_MTAANI] ===========================================")
 
       // ONLY process product items (retailer orders)
       if (!order.orderItems || order.orderItems.length === 0) {
@@ -1648,10 +1650,20 @@ export class PaymentsService {
       // Group products by retailer
       const retailerGroups = new Map()
 
+      console.log("📦 [PICKUP_MTAANI] ===========================================")
+      console.log("📦 [PICKUP_MTAANI] GROUPING ITEMS BY RETAILER")
+      console.log("📦 [PICKUP_MTAANI] ===========================================")
+
       for (const item of order.orderItems) {
         const retailerId = item.product.retailerId
+        console.log(`📦 [PICKUP_MTAANI] Processing item: ${item.title}`)
+        console.log(`📦 [PICKUP_MTAANI]   - Product ID: ${item.productId}`)
+        console.log(`📦 [PICKUP_MTAANI]   - Retailer ID: ${retailerId}`)
+        console.log(`📦 [PICKUP_MTAANI]   - Retailer Name: ${item.product.retailer?.businessName || item.product.retailer?.fullName || 'Unknown'}`)
+        console.log(`📦 [PICKUP_MTAANI]   - Item Price: ${item.totalPrice}`)
 
         if (!retailerGroups.has(retailerId)) {
+          console.log(`📦 [PICKUP_MTAANI]   - Creating new retailer group for ${retailerId}`)
           retailerGroups.set(retailerId, {
             retailer: item.product.retailer,
             items: [],
@@ -1662,11 +1674,21 @@ export class PaymentsService {
         const group = retailerGroups.get(retailerId)
         group.items.push(item)
         group.totalValue += Number(item.totalPrice)
+        console.log(`📦 [PICKUP_MTAANI]   - Added to group. New total: ${group.totalValue}`)
       }
 
-      console.log(
-        `📦 [PICKUP_MTAANI] Grouped items into ${retailerGroups.size} retailer(s)`
-      )
+      console.log("📦 [PICKUP_MTAANI] ===========================================")
+      console.log(`📦 [PICKUP_MTAANI] Grouped items into ${retailerGroups.size} retailer(s)`)
+      
+      // Debug: Log each retailer group
+      retailerGroups.forEach((group, retailerId) => {
+        console.log(`📦 [PICKUP_MTAANI] Retailer Group ${retailerId}:`)
+        console.log(`📦 [PICKUP_MTAANI]   - Name: ${group.retailer.businessName || group.retailer.fullName}`)
+        console.log(`📦 [PICKUP_MTAANI]   - Items: ${group.items.length}`)
+        console.log(`📦 [PICKUP_MTAANI]   - Total Value: ${group.totalValue}`)
+        console.log(`📦 [PICKUP_MTAANI]   - Has PickupMtaani Details: ${!!group.retailer.pickupMtaaniBusinessDetails}`)
+      })
+      console.log("📦 [PICKUP_MTAANI] ===========================================")
 
       // Get client shipping details
       if (!order.userId) {
@@ -1959,6 +1981,18 @@ export class PaymentsService {
         await this.sendFailedPackageNotifications(order, this.failedPackages)
       }
 
+      console.log(
+        "📦 [PICKUP_MTAANI] ==========================================="
+      )
+      console.log("📦 [PICKUP_MTAANI] PACKAGE CREATION SUMMARY")
+      console.log(
+        "📦 [PICKUP_MTAANI] ==========================================="
+      )
+      console.log(`📦 [PICKUP_MTAANI] Total Retailers Processed: ${retailerGroups.size}`)
+      console.log(`📦 [PICKUP_MTAANI] Packages Created Successfully: ${packages.length}`)
+      console.log(`📦 [PICKUP_MTAANI] Packages Failed: ${this.failedPackages.length}`)
+      console.log(`📦 [PICKUP_MTAANI] Total Packages: ${this.failedPackages.length + packages.length}`)
+      console.log(`📦 [PICKUP_MTAANI] Success Rate: ${packages.length}/${retailerGroups.size} (${retailerGroups.size > 0 ? Math.round((packages.length / retailerGroups.size) * 100) : 0}%)`)
       console.log(
         "📦 [PICKUP_MTAANI] ==========================================="
       )

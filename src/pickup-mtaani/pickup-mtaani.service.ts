@@ -345,6 +345,9 @@ export class PickupMtaaniService {
         }
       )
 
+      this.logger.log(`📦 [GET_PACKAGES] API Response Status: ${response.status}`)
+      this.logger.log(`📦 [GET_PACKAGES] API Response Data:`, JSON.stringify(response.data, null, 2))
+
       const packages = response.data.data || []
       this.logger.log(`📦 [GET_PACKAGES] Found ${packages.length} packages`)
 
@@ -352,6 +355,71 @@ export class PickupMtaaniService {
     } catch (error) {
       this.logger.error(
         "❌ [GET_PACKAGES] Failed to fetch packages:",
+        error.response?.data || error.message
+      )
+      return []
+    }
+  }
+
+  /**
+   * Get ALL packages for the business from Pick Up Mtaani (including paid ones)
+   * @param businessId The Pickup Mtaani business ID (required)
+   * @returns Array of packages with current status
+   */
+  async getAllBusinessPackagesIncludingPaid(businessId: string): Promise<any[]> {
+    try {
+      if (!businessId) {
+        this.logger.warn("⚠️ [GET_ALL_PACKAGES] No business ID provided - cannot fetch packages")
+        return []
+      }
+
+      this.logger.log(
+        `📦 [GET_ALL_PACKAGES] Fetching ALL packages from Pick Up Mtaani for business ${businessId}...`
+      )
+
+      // Try different endpoints to get all packages
+      const endpoints = [
+        `/packages/my-packages?b_id=${businessId}`,
+        `/packages?b_id=${businessId}`,
+        `/packages/all?b_id=${businessId}`,
+        `/businesses/${businessId}/packages`
+      ]
+
+      for (const endpoint of endpoints) {
+        try {
+          this.logger.log(`📦 [GET_ALL_PACKAGES] Trying endpoint: ${endpoint}`)
+          
+          const response = await axios.get(
+            `${this.baseUrl}${endpoint}`,
+            {
+              headers: {
+                accept: "application/json",
+                apiKey: this.apiKey,
+              },
+              timeout: 10000,
+            }
+          )
+
+          this.logger.log(`📦 [GET_ALL_PACKAGES] API Response Status: ${response.status}`)
+          this.logger.log(`📦 [GET_ALL_PACKAGES] API Response Data:`, JSON.stringify(response.data, null, 2))
+
+          const packages = response.data.data || response.data || []
+          this.logger.log(`📦 [GET_ALL_PACKAGES] Found ${packages.length} packages via ${endpoint}`)
+          
+          if (packages.length > 0) {
+            return packages
+          }
+        } catch (endpointError) {
+          this.logger.log(`📦 [GET_ALL_PACKAGES] Endpoint ${endpoint} failed:`, endpointError.response?.status || endpointError.message)
+          continue
+        }
+      }
+
+      this.logger.log(`📦 [GET_ALL_PACKAGES] No packages found via any endpoint`)
+      return []
+    } catch (error) {
+      this.logger.error(
+        "❌ [GET_ALL_PACKAGES] Failed to fetch packages:",
         error.response?.data || error.message
       )
       return []
@@ -537,6 +605,39 @@ export class PickupMtaaniService {
       return {
         success: false,
         error: error.response?.data?.message || "Failed to fetch business categories",
+      }
+    }
+  }
+
+  /**
+   * List all businesses for debugging
+   */
+  async listAllBusinesses(): Promise<{
+    success: boolean
+    data?: any[]
+    error?: string
+  }> {
+    try {
+      this.logger.log(`[BUSINESS] Listing all businesses for debugging`)
+
+      const response = await axios.get(
+        `${this.baseUrl}/businesses`,
+        {
+          headers: {
+            accept: "application/json",
+            apiKey: this.apiKey,
+          },
+          timeout: 10000,
+        }
+      )
+
+      this.logger.log(`✅ [BUSINESS] Businesses listed successfully`)
+      return { success: true, data: response.data.data || response.data }
+    } catch (error) {
+      this.logger.error(`❌ [BUSINESS] Failed to list businesses:`, error)
+      return {
+        success: false,
+        error: error.response?.data?.message || "Failed to list businesses",
       }
     }
   }

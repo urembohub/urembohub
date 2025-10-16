@@ -354,7 +354,7 @@ export class AnalyticsService {
     ] = await Promise.all([
       this.prisma.order.count({ where: paystackOrdersWhere }),
       this.prisma.order.count({ where: { ...paystackOrdersWhere, status: 'pending' } }),
-      this.prisma.order.count({ where: { ...paystackOrdersWhere, status: 'confirmed' } }),
+      this.prisma.order.count({ where: { ...paystackOrdersWhere, status: { equals: 'confirmed', mode: 'insensitive' } } }),
       this.prisma.order.count({ where: { ...paystackOrdersWhere, status: 'cancelled' } }),
       this.prisma.order.count({ where: { ...paystackOrdersWhere, createdAt: { gte: whereClause.today } } }),
       this.prisma.order.count({ where: { ...paystackOrdersWhere, createdAt: { gte: whereClause.weekAgo } } }),
@@ -679,7 +679,7 @@ export class AnalyticsService {
     ] = await Promise.all([
       this.prisma.manufacturerOrder.count({ where: whereClause.manufacturerOrders }),
       this.prisma.manufacturerOrder.count({ where: { ...whereClause.manufacturerOrders, status: 'pending' } }),
-      this.prisma.manufacturerOrder.count({ where: { ...whereClause.manufacturerOrders, status: 'confirmed' } }),
+      this.prisma.manufacturerOrder.count({ where: { ...whereClause.manufacturerOrders, status: { equals: 'confirmed', mode: 'insensitive' } } }),
       this.prisma.manufacturerOrder.count({ where: { ...whereClause.manufacturerOrders, status: 'shipped' } }),
       this.prisma.manufacturerOrder.count({ where: { ...whereClause.manufacturerOrders, status: 'delivered' } }),
       this.prisma.manufacturerOrder.aggregate({
@@ -838,7 +838,7 @@ export class AnalyticsService {
     ] = await Promise.all([
       this.prisma.order.count({ where: whereClause }),
       this.prisma.order.count({ where: { ...whereClause, status: 'pending' } }),
-      this.prisma.order.count({ where: { ...whereClause, status: 'confirmed' } }),
+      this.prisma.order.count({ where: { ...whereClause, status: { equals: 'confirmed', mode: 'insensitive' } } }),
       this.prisma.order.count({ where: { ...whereClause, status: 'cancelled' } }),
       this.prisma.order.aggregate({
         where: { ...whereClause, status: { not: 'cancelled' } },
@@ -1105,16 +1105,16 @@ export class AnalyticsService {
           (SELECT COUNT(*) FROM profiles WHERE role = 'manufacturer' AND is_verified = true AND is_suspended = false) as active_manufacturers,
           (SELECT COUNT(*) FROM profiles WHERE onboarding_status = 'pending') as pending_verifications,
           
-          -- Revenue Metrics (Current Month) - Orders that are confirmed/shipped/delivered/completed (considered paid)
-          (SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE status IN ('confirmed', 'shipped', 'delivered', 'completed') AND created_at >= date_trunc('month', CURRENT_DATE)) as monthly_revenue,
-          (SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE status IN ('confirmed', 'shipped', 'delivered', 'completed') AND created_at >= CURRENT_DATE) as today_revenue,
-          (SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE status IN ('confirmed', 'shipped', 'delivered', 'completed') AND created_at >= date_trunc('month', CURRENT_DATE - INTERVAL '1 month')) as last_month_revenue,
+          -- Revenue Metrics (Current Month) - Orders that are paid/confirmed/shipped/delivered/completed (considered paid)
+          (SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE status IN ('paid', 'confirmed', 'ready_for_shipping', 'in_transit', 'shipped', 'delivered', 'completed') AND created_at >= date_trunc('month', CURRENT_DATE)) as monthly_revenue,
+          (SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE status IN ('paid', 'confirmed', 'ready_for_shipping', 'in_transit', 'shipped', 'delivered', 'completed') AND created_at >= CURRENT_DATE) as today_revenue,
+          (SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE status IN ('paid', 'confirmed', 'ready_for_shipping', 'in_transit', 'shipped', 'delivered', 'completed') AND created_at >= date_trunc('month', CURRENT_DATE - INTERVAL '1 month')) as last_month_revenue,
           
           -- Order Metrics
           (SELECT COUNT(*) FROM orders WHERE created_at >= date_trunc('month', CURRENT_DATE)) as monthly_orders,
           (SELECT COUNT(*) FROM orders WHERE created_at >= CURRENT_DATE) as today_orders,
           (SELECT COUNT(*) FROM orders WHERE status = 'pending') as pending_orders,
-          (SELECT COUNT(*) FROM orders WHERE status IN ('confirmed', 'shipped', 'delivered', 'completed')) as completed_orders,
+          (SELECT COUNT(*) FROM orders WHERE status IN ('paid', 'confirmed', 'ready_for_shipping', 'in_transit', 'shipped', 'delivered', 'completed')) as completed_orders,
           
           -- Product/Service Metrics
           (SELECT COUNT(*) FROM products WHERE is_active = true) as total_products,
