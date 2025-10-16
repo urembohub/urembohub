@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
-import { order_status, order_status_enhanced } from '@prisma/client';
+// Removed order_status and order_status_enhanced imports as we now use string status
 
 export interface CreateOrderDto {
   cartItems: Array<{
@@ -28,8 +28,7 @@ export interface CreateOrderDto {
 }
 
 export interface UpdateOrderDto {
-  status?: order_status;
-  statusEnhanced?: order_status_enhanced;
+  status?: string;
   notes?: string;
   escrowAmount?: number;
   escrowStatus?: string;
@@ -139,7 +138,7 @@ export class OrdersService {
     return this.getOrderById(order.id);
   }
 
-  async getAllOrders(status?: order_status) {
+  async getAllOrders(status?: string) {
     const where = status ? { status } : {};
     
     const orders = await this.prisma.order.findMany({
@@ -248,6 +247,15 @@ export class OrdersService {
       throw new NotFoundException('Order not found');
     }
 
+    // Log package tracking fields for debugging
+    console.log('📦 [GET_ORDER_BY_ID] Order package tracking fields:', {
+      orderId: order.id,
+      packageStatus: order.packageStatus,
+      packageTrackingId: order.packageTrackingId,
+      packageReceiptNo: order.packageReceiptNo,
+      packageTrackingLink: order.packageTrackingLink,
+    });
+
     return order;
   }
 
@@ -325,21 +333,21 @@ export class OrdersService {
           items: order.orderItems.map(item => item.title)
         };
         
-        if (newStatus === order_status.confirmed) {
+        if (newStatus === 'paid') {
           await this.emailService.sendOrderAcceptedEmail(
             customerEmail,
             customerName,
             order.id,
             orderData
           );
-        } else if (newStatus === order_status.shipped) {
+        } else if (newStatus === 'shipped' || newStatus === 'in_transit') {
           await this.emailService.sendOrderShippedEmail(
             customerEmail,
             customerName,
             order.id,
             'TRK123456789'
           );
-        } else if (newStatus === order_status.delivered) {
+        } else if (newStatus === 'delivered') {
           await this.emailService.sendOrderDeliveredEmail(
             customerEmail,
             customerName,
@@ -395,6 +403,7 @@ export class OrdersService {
       orderBy: { createdAt: 'desc' },
     });
 
+
     return orders;
   }
 
@@ -415,8 +424,8 @@ export class OrdersService {
     return this.prisma.order.update({
       where: { id },
       data: {
-        status: order_status.confirmed,
-        statusEnhanced: order_status_enhanced.paid,
+        status: 'paid',
+        paidAt: new Date(),
         confirmedAt: new Date(),
       },
     });
@@ -439,8 +448,7 @@ export class OrdersService {
     return this.prisma.order.update({
       where: { id },
       data: {
-        status: order_status.delivered,
-        statusEnhanced: order_status_enhanced.completed,
+        status: 'delivered',
         completedAt: new Date(),
       },
     });
@@ -463,8 +471,7 @@ export class OrdersService {
     return this.prisma.order.update({
       where: { id },
       data: {
-        status: order_status.cancelled,
-        statusEnhanced: order_status_enhanced.cancelled,
+        status: 'cancelled',
         notes: reason ? `${order.notes || ''}\nCancellation reason: ${reason}`.trim() : order.notes,
       },
     });
@@ -481,7 +488,7 @@ export class OrdersService {
     return this.prisma.order.update({
       where: { id },
       data: {
-        statusEnhanced: order_status_enhanced.disputed,
+        status: 'disputed',
         disputedAt: new Date(),
         notes: `${order.notes || ''}\nDispute reason: ${reason}`.trim(),
       },
@@ -508,7 +515,7 @@ export class OrdersService {
     });
   }
 
-  async getOrdersByStatus(status: order_status) {
+  async getOrdersByStatus(status: string) {
     const orders = await this.prisma.order.findMany({
       where: { status },
       include: {

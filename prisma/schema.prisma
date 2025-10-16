@@ -46,6 +46,7 @@ model Profile {
   deliveryDetails                  Json?                      @map("delivery_details")
   deliveryDetailsVerified          Boolean?                   @default(false) @map("delivery_details_verified")
   deliveryMethod                   String?                    @map("delivery_method")
+  pickupMtaaniBusinessDetails      Json?                      @map("pickup_mtaani_business_details")
   clientAppointments               Appointment[]              @relation("AppointmentClient")
   vendorAppointments               Appointment[]              @relation("AppointmentVendor")
   commissionTransactions           CommissionTransaction[]
@@ -160,8 +161,7 @@ model Order {
   serviceType           String?                    @map("service_type")
   totalAmount           Decimal                    @map("total_amount") @db.Decimal(10, 2)
   currency              String                     @default("KES")
-  status                order_status               @default(pending)
-  statusEnhanced        order_status_enhanced?     @map("status_enhanced")
+  status                String                     @default("pending")
   customerEmail         String                     @map("customer_email")
   customerPhone         String?                    @map("customer_phone")
   shippingAddress       Json?                      @map("shipping_address")
@@ -183,6 +183,12 @@ model Order {
   paymentMethod         String?                    @map("payment_method")
   paymentReference      String?                    @map("payment_reference")
   paymentStatus         String?                    @map("payment_status")
+  packageStatus         String?                    @map("package_status")
+  packageTrackingId     String?                    @map("package_tracking_id")
+  packageReceiptNo      String?                    @map("package_receipt_no")
+  packageTrackingLink   String?                    @map("package_tracking_link")
+  packageTrackingHistory Json?                     @map("package_tracking_history")
+  deliveryFee           Decimal?                   @map("delivery_fee") @db.Decimal(10, 2)
   orderItems            OrderItem[]
   user                  Profile?                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   paymentVerifications  PaymentVerificationQueue[]
@@ -290,7 +296,7 @@ model CommissionTransaction {
   transactionAmount     Decimal   @map("transaction_amount") @db.Decimal(10, 2)
   commissionRate        Decimal   @map("commission_rate") @db.Decimal(5, 2)
   commissionAmount      Decimal   @map("commission_amount") @db.Decimal(10, 2)
-  paymentStatus         String    @default("pending") @map("payment_status")
+  paymentStatus         CommissionPaymentStatus @default(pending) @map("payment_status")
   paymentMethodId       String?   @map("payment_method_id")
   stripePaymentIntentId String?   @map("stripe_payment_intent_id")
   processedAt           DateTime? @map("processed_at")
@@ -1103,6 +1109,15 @@ model PaymentVerificationQueue {
   @@map("payment_verification_queue")
 }
 
+model OnboardingSettings {
+  id                String   @id @default(uuid())
+  useMultiStepForm  Boolean  @default(false) @map("use_multi_step_form")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@map("onboarding_settings")
+}
+
 enum user_role {
   client
   vendor
@@ -1120,6 +1135,8 @@ enum order_status {
   pending_confirmation
   confirmed
   completed
+  partially_shipped
+  shipping_failed
 }
 
 enum order_status_enhanced {
@@ -1237,4 +1254,12 @@ enum VerificationStatus {
   verified
   failed
   expired
+}
+
+enum CommissionPaymentStatus {
+  pending
+  processing
+  completed
+  failed
+  reversed
 }

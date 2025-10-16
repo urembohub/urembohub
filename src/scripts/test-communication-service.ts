@@ -1,5 +1,6 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
+import { EmailQueueService } from '../email/email-queue.service';
 import { AdminNotificationService } from '../admin/admin-notification.service';
 import { PasswordResetService } from '../auth/password-reset.service';
 import { ConfigService } from '@nestjs/config';
@@ -11,7 +12,8 @@ async function testCommunicationService() {
   const prisma = new PrismaService();
   const configService = new ConfigService();
   const emailService = new EmailService(configService);
-  const adminNotificationService = new AdminNotificationService(prisma, emailService);
+  const emailQueueService = new EmailQueueService(null as any); // Mock queue for testing
+  const adminNotificationService = new AdminNotificationService(prisma, emailService, emailQueueService);
   const passwordResetService = new PasswordResetService(prisma, emailService, configService);
 
   try {

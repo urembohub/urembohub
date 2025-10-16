@@ -122,7 +122,7 @@ export class CommissionService {
         transactionAmount: data.transactionAmount,
         commissionAmount: data.commissionAmount,
         commissionRate: data.commissionRate,
-        paymentStatus: data.paymentStatus,
+        paymentStatus: data.paymentStatus as any,
         paymentMethodId: data.paymentMethodId,
         stripePaymentIntentId: data.stripePaymentIntentId,
         metadata: data.metadata,
@@ -153,7 +153,7 @@ export class CommissionService {
     return this.prisma.commissionTransaction.update({
       where: { id },
       data: { 
-        paymentStatus,
+        paymentStatus: paymentStatus as any,
         processedAt: paymentStatus === 'paid' ? new Date() : null,
       },
       include: {
@@ -254,7 +254,7 @@ export class CommissionService {
         _sum: { commissionAmount: true },
       }),
       this.prisma.commissionTransaction.aggregate({
-        where: { businessUserId: userId, paymentStatus: 'paid' },
+        where: { businessUserId: userId, paymentStatus: 'completed' as any },
         _sum: { commissionAmount: true },
       }),
       this.prisma.commissionTransaction.aggregate({
@@ -288,5 +288,112 @@ export class CommissionService {
       commissionRate: Number(setting.commissionRate),
       commissionAmount,
     };
+  }
+
+  /**
+   * Mark commission as processing
+   */
+  async markCommissionAsProcessing(
+    reference: string,
+    chargeData: {
+      chargedAt: Date;
+      transactionId: string;
+      amount: number;
+    }
+  ) {
+    // Find commissions by transaction ID (which should be the order ID)
+    const commissions = await this.prisma.commissionTransaction.findMany({
+      where: {
+        transactionId: reference,
+        paymentStatus: 'pending',
+      },
+    });
+
+    for (const commission of commissions) {
+      await this.prisma.commissionTransaction.update({
+        where: { id: commission.id },
+        data: {
+          paymentStatus: 'processing',
+        metadata: {
+          ...(commission.metadata as any || {}),
+          chargedAt: chargeData.chargedAt.toISOString(),
+          transactionId: chargeData.transactionId,
+        },
+        },
+      });
+    }
+
+    return commissions;
+  }
+
+  /**
+   * Mark commission as completed
+   */
+  async markCommissionAsCompleted(
+    settlementId: string,
+    settlementData: {
+      settlementId: string;
+      settledAt: Date;
+      subaccounts: any[];
+    }
+  ) {
+    // Find commissions that are part of this settlement
+    // Match by subaccount IDs in settlement data
+    for (const subaccountSettlement of settlementData.subaccounts) {
+      const commissions = await this.prisma.commissionTransaction.findMany({
+        where: {
+          paymentStatus: 'processing',
+          // We'll need to match by business user's subaccount ID
+          businessUser: {
+            paystackSubaccountId: subaccountSettlement.subaccount,
+          },
+        },
+      });
+
+      for (const commission of commissions) {
+        await this.prisma.commissionTransaction.update({
+          where: { id: commission.id },
+          data: {
+            paymentStatus: 'completed',
+            processedAt: settlementData.settledAt,
+          metadata: {
+            ...(commission.metadata as any || {}),
+            settlementId: settlementData.settlementId,
+            settledAmount: subaccountSettlement.amount / 100,
+          },
+          },
+        });
+      }
+    }
+  }
+
+  /**
+   * Mark commission as failed
+   */
+  async markCommissionAsFailed(settlementId: string, failureData: any) {
+    // Find commissions with this settlement reference in metadata
+    const commissions = await this.prisma.commissionTransaction.findMany({
+      where: {
+        paymentStatus: 'processing',
+        metadata: {
+          path: ['settlementId'],
+          equals: settlementId,
+        },
+      },
+    });
+
+    for (const commission of commissions) {
+      await this.prisma.commissionTransaction.update({
+        where: { id: commission.id },
+        data: {
+          paymentStatus: 'failed',
+        metadata: {
+          ...(commission.metadata as any || {}),
+          failureReason: failureData.failureReason,
+          failedAt: failureData.failedAt,
+        },
+        },
+      });
+    }
   }
 }

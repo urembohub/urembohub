@@ -633,42 +633,6 @@ export class PaystackService {
     }
   }
 
-  /**
-   * Get transfer status
-   */
-  async getTransferStatus(transferCode: string): Promise<{ success: boolean; data?: any; message?: string }> {
-    try {
-      const response = await axios.get(
-        `${this.paystackBaseUrl}/transfer/${transferCode}`,
-        {
-          headers: {
-            Authorization: `Bearer ${this.paystackSecretKey}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      if (!response.data.status) {
-        return {
-          success: false,
-          message: response.data.message || 'Failed to get transfer status'
-        };
-      }
-
-      return {
-        success: true,
-        data: response.data.data,
-        message: 'Transfer status retrieved successfully'
-      };
-
-    } catch (error) {
-      this.logger.error(`❌ [PAYOUT] Error getting transfer status:`, error.response?.data || error.message);
-      return {
-        success: false,
-        message: error.response?.data?.message || 'Failed to get transfer status'
-      };
-    }
-  }
 
   /**
    * Get all transfers
@@ -704,6 +668,27 @@ export class PaystackService {
         success: false,
         message: error.response?.data?.message || 'Failed to get transfers'
       };
+    }
+  }
+
+  /**
+   * Get transfer status from Paystack
+   */
+  async getTransferStatus(reference: string) {
+    try {
+      const response = await axios.get(
+        `${this.paystackBaseUrl}/transfer/verify/${reference}`,
+        {
+          headers: {
+            Authorization: `Bearer ${this.paystackSecretKey}`,
+          },
+        }
+      );
+
+      return response.data.data;
+    } catch (error) {
+      this.logger.error(`Error fetching transfer status:`, error);
+      throw error;
     }
   }
 }

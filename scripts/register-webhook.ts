@@ -79,15 +79,8 @@ async function registerWebhook() {
       console.log("ℹ️  [WEBHOOK] Webhook test not available (this is optional)")
     }
 
-    // Get current webhook config
-    console.log("")
-    console.log("📋 [WEBHOOK] Fetching current webhook configuration...")
-    const config = await pickupMtaaniService.getWebhookConfig()
-
-    if (config.success) {
-      console.log("Current webhook config:")
-      console.log(JSON.stringify(config.data, null, 2))
-    }
+    // Note: Webhook config requires a specific business ID, so we skip it here
+    // The webhook registration itself doesn't require a business ID
 
     await app.close()
     process.exit(0)

@@ -10,6 +10,7 @@ import {
   Logger,
 } from "@nestjs/common"
 import { PickupMtaaniService } from "./pickup-mtaani.service"
+import { CreateBusinessDto } from "./dto/create-business.dto"
 import { PaymentVerificationService } from "./payment-verification.service"
 import { PrismaService } from "../prisma/prisma.service"
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard"
@@ -53,11 +54,14 @@ export class PickupMtaaniController {
         where: {
           status: {
             in: [
-              "confirmed",
-              "processing",
+              "paid",                    // Updated from "confirmed"
+              "ready_for_shipping",      // Updated from "processing"
+              "in_transit",              // New Pickup Mtaani state
               "shipped",
-              "completed",
               "delivered",
+              "completed",
+              "cancelled",               // Include cancelled for completeness
+              "returned",                // Include returned for completeness
             ],
           },
         },
@@ -102,9 +106,34 @@ export class PickupMtaaniController {
         }
       })
 
-      // Get all packages from Pick Up Mtaani for real-time status
-      const allPickupMtaaniPackages =
-        await this.pickupMtaaniService.getAllBusinessPackages()
+      // Get retailer profile to check if they have Pickup Mtaani business setup
+      const retailerProfile = await this.prisma.profile.findUnique({
+        where: { id: retailerId },
+        select: {
+          pickupMtaaniBusinessDetails: true,
+          businessName: true,
+          fullName: true
+        }
+      })
+
+      // Check if retailer has completed Pickup Mtaani business setup
+      const businessIdValidation = this.pickupMtaaniService.validateRetailerBusinessId(retailerProfile)
+      
+      console.log(`🔍 [GET_RETAILER_PACKAGES] Business ID validation for retailer ${retailerId}:`, {
+        valid: businessIdValidation.valid,
+        businessId: businessIdValidation.businessId,
+        error: businessIdValidation.error,
+        retailerProfile: retailerProfile
+      })
+      
+      let allPickupMtaaniPackages: any[] = []
+      if (businessIdValidation.valid) {
+        // Only fetch packages if retailer has valid business ID
+        allPickupMtaaniPackages = await this.pickupMtaaniService.getAllBusinessPackages(businessIdValidation.businessId)
+      } else {
+        console.log(`⚠️ [GET_RETAILER_PACKAGES] Retailer ${retailerId} has not completed Pickup Mtaani business setup`)
+        console.log(`⚠️ [GET_RETAILER_PACKAGES] Error: ${businessIdValidation.error}`)
+      }
 
       // Create a map for quick lookup
       const pickupMtaaniMap = new Map(
@@ -158,11 +187,20 @@ export class PickupMtaaniController {
             `📦 [GET_RETAILER_PACKAGES]   - Items: ${retailerItems.length}`
           )
 
+          const packageBusinessId = businessIdValidation.valid ? businessIdValidation.businessId : undefined
+          
+          console.log(`🔍 [GET_RETAILER_PACKAGES] Setting business ID for package ${pkg.packageId}:`, {
+            businessId: packageBusinessId,
+            validationValid: businessIdValidation.valid,
+            validationBusinessId: businessIdValidation.businessId
+          })
+
           retailerPackages.push({
             // From our database
             orderId: order.id,
             retailerId: pkg.retailerId,
             retailerName: pkg.retailerName,
+            businessId: packageBusinessId,
             packageValue: pkg.packageValue,
             packageName: pkg.packageName,
             customerName: pkg.customerName || order.customerEmail,
@@ -178,11 +216,12 @@ export class PickupMtaaniController {
             status: liveData?.state || pkg.status, // Real-time status or fallback
             createdAt: pkg.createdAt,
             updatedAt: liveData?.updatedAt,
+            trackingLink: liveData?.trackingLink || order.packageTrackingLink, // Include tracking link from Pick Up Mtaani or fallback to stored data
 
             // Order details
             orderCreatedAt: order.createdAt.toISOString(),
             orderStatus: order.status,
-            paymentStatus: order.paymentStatus || "paid",
+            paymentStatus: liveData?.payment_status || pkg.paymentStatus || order.paymentStatus,
           })
         }
       }
@@ -190,6 +229,11 @@ export class PickupMtaaniController {
       console.log(
         `📦 [GET_RETAILER_PACKAGES] Returning ${retailerPackages.length} packages total`
       )
+
+      // If no packages and business setup is incomplete, add a helpful message
+      if (retailerPackages.length === 0 && !businessIdValidation.valid) {
+        console.log(`ℹ️ [GET_RETAILER_PACKAGES] No packages found - retailer needs to complete Pickup Mtaani business setup`)
+      }
 
       return retailerPackages
     } catch (error) {
@@ -221,7 +265,7 @@ export class PickupMtaaniController {
           },
         },
         status: {
-          in: ["confirmed", "processing", "shipped", "completed"],
+          in: ["paid", "ready_for_shipping", "in_transit", "shipped", "delivered", "completed", "cancelled", "returned"],
         },
       },
       include: {
@@ -242,8 +286,24 @@ export class PickupMtaaniController {
       },
     })
 
-    const allPickupMtaaniPackages =
-      await this.pickupMtaaniService.getAllBusinessPackages()
+    // Get retailer profile to get business ID
+    const retailerProfile = await this.prisma.profile.findUnique({
+      where: { id: retailerId },
+      select: {
+        pickupMtaaniBusinessDetails: true,
+      }
+    })
+
+    // Validate business ID
+    const businessIdValidation = this.pickupMtaaniService.validateRetailerBusinessId(retailerProfile)
+    
+    let allPickupMtaaniPackages: any[] = []
+    if (businessIdValidation.valid) {
+      allPickupMtaaniPackages = await this.pickupMtaaniService.getAllBusinessPackages(businessIdValidation.businessId)
+    } else {
+      console.log(`⚠️ [GET_RETAILER_PACKAGES_BY_ID] Retailer ${retailerId} has not completed Pickup Mtaani business setup`)
+    }
+
     const pickupMtaaniMap = new Map(
       allPickupMtaaniPackages.map((pkg) => [pkg.id, pkg])
     )
@@ -289,7 +349,7 @@ export class PickupMtaaniController {
           updatedAt: liveData?.updatedAt,
           orderCreatedAt: order.createdAt.toISOString(),
           orderStatus: order.status,
-          paymentStatus: order.paymentStatus || "paid",
+          paymentStatus: liveData?.payment_status || pkg.paymentStatus || order.paymentStatus,
         })
       }
     }
@@ -302,9 +362,37 @@ export class PickupMtaaniController {
    */
   @UseGuards(JwtAuthGuard)
   @Get("package/:receiptNo")
-  async getPackageByReceipt(@Param("receiptNo") receiptNo: string) {
+  async getPackageByReceipt(@Param("receiptNo") receiptNo: string, @Req() req: any) {
+    // Get retailer ID from request
+    const retailerId = req.user?.userId || req.user?.sub || req.user?.id
+
+    if (!retailerId) {
+      return {
+        success: false,
+        message: "Retailer ID not found in request",
+      }
+    }
+
+    // Get retailer profile to get business ID
+    const retailerProfile = await this.prisma.profile.findUnique({
+      where: { id: retailerId },
+      select: {
+        pickupMtaaniBusinessDetails: true,
+      }
+    })
+
+    // Validate business ID
+    const businessIdValidation = this.pickupMtaaniService.validateRetailerBusinessId(retailerProfile)
+    
+    if (!businessIdValidation.valid) {
+      return {
+        success: false,
+        message: businessIdValidation.error || "Retailer has not completed Pickup Mtaani business setup",
+      }
+    }
+
     const packageData =
-      await this.pickupMtaaniService.getPackageByIdentifier(receiptNo)
+      await this.pickupMtaaniService.getPackageByIdentifier(receiptNo, businessIdValidation.businessId)
 
     if (!packageData) {
       return {
@@ -401,16 +489,53 @@ export class PickupMtaaniController {
   }
 
   /**
-   * Test endpoint to get all packages (admin only)
+   * Test endpoint to get all packages for a specific retailer (admin only)
    */
   @UseGuards(JwtAuthGuard)
-  @Get("packages/all")
-  async getAllPackages() {
-    const packages = await this.pickupMtaaniService.getAllBusinessPackages()
+  @Get("packages/retailer/:retailerId")
+  async getAllPackagesForRetailer(@Param("retailerId") retailerId: string) {
+    // Get retailer profile to get business ID
+    const retailerProfile = await this.prisma.profile.findUnique({
+      where: { id: retailerId },
+      select: {
+        pickupMtaaniBusinessDetails: true,
+      }
+    })
+
+    // Validate business ID
+    const businessIdValidation = this.pickupMtaaniService.validateRetailerBusinessId(retailerProfile)
+    
+    if (!businessIdValidation.valid) {
+      return {
+        success: false,
+        message: businessIdValidation.error || "Retailer has not completed Pickup Mtaani business setup",
+        count: 0,
+        data: [],
+      }
+    }
+
+    const packages = await this.pickupMtaaniService.getAllBusinessPackages(businessIdValidation.businessId)
     return {
       success: true,
       count: packages.length,
       data: packages,
     }
+  }
+
+  /**
+   * Get business categories from Pickup Mtaani
+   */
+  @Get("business-categories")
+  async getBusinessCategories() {
+    return await this.pickupMtaaniService.getBusinessCategories()
+  }
+
+  /**
+   * Create business on Pickup Mtaani
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post("business")
+  async createBusiness(@Body() createBusinessDto: CreateBusinessDto) {
+    return await this.pickupMtaaniService.createBusiness(createBusinessDto)
   }
 }

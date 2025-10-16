@@ -63,26 +63,12 @@ const onboardingRequirementsData = {
       },
     },
     {
-      label: "Business Registration Certificate",
-      fieldType: onboarding_field_type.file,
-      isMandatory: true,
-      description: "Upload your business registration certificate",
-      placeholder: null,
-      position: 5,
-      isPaymentRelated: false,
-      validationRules: {
-        fileTypes: ["image/jpeg", "image/png", "application/pdf"],
-        maxSize: "10MB",
-        required: true,
-      },
-    },
-    {
       label: "Tax Identification Number",
       fieldType: onboarding_field_type.text,
       isMandatory: true,
       description: "Provide your tax identification number",
       placeholder: "e.g., TIN123456789",
-      position: 6,
+      position: 5,
       isPaymentRelated: true,
       validationRules: {
         minLength: 8,
@@ -246,7 +232,7 @@ const onboardingRequirementsData = {
       isMandatory: true,
       description: "Provide your tax identification number",
       placeholder: "e.g., TIN123456789",
-      position: 6,
+      position: 5,
       isPaymentRelated: true,
       validationRules: {
         minLength: 8,
@@ -447,7 +433,7 @@ const onboardingRequirementsData = {
       isMandatory: false,
       description: "Upload photos of your manufacturing facility (optional)",
       placeholder: null,
-      position: 6,
+      position: 5,
       isPaymentRelated: false,
       validationRules: {
         fileTypes: ["image/jpeg", "image/png"],

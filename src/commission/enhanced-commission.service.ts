@@ -39,8 +39,7 @@ export class EnhancedCommissionService {
         return {
           commissionRate: 0,
           commissionAmount: 0,
-          netAmount: transactionAmount,
-          platformFee: 0
+          netAmount: transactionAmount
         };
       }
 
@@ -51,20 +50,15 @@ export class EnhancedCommissionService {
       // Calculate commission amount
       const commissionAmount = (transactionAmount * commissionRate) / 100;
       
-      // Platform fee (fixed percentage for platform operations)
-      const platformFeeRate = 0.02; // 2% platform fee
-      const platformFee = transactionAmount * platformFeeRate;
-      
-      // Net amount after commission and platform fee
-      const netAmount = transactionAmount - commissionAmount - platformFee;
+      // Net amount after commission (no platform fee)
+      const netAmount = transactionAmount - commissionAmount;
 
-      this.logger.log(`Commission calculated: ${commissionAmount}, Platform fee: ${platformFee}, Net: ${netAmount}`);
+      this.logger.log(`Commission calculated: ${commissionAmount}, Net: ${netAmount}`);
 
       return {
         commissionRate,
         commissionAmount,
-        netAmount,
-        platformFee
+        netAmount
       };
     } catch (error) {
       this.logger.error(`Error calculating commission: ${error.message}`);

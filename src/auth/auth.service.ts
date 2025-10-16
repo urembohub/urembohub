@@ -256,6 +256,7 @@ export class AuthService {
         deliveryDetails: true,
         deliveryMethod: true,
         deliveryDetailsVerified: true,
+        pickupMtaaniBusinessDetails: true,
         createdAt: true,
         updatedAt: true,
       },

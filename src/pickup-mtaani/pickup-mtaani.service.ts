@@ -1,10 +1,11 @@
 import { Injectable, Logger } from "@nestjs/common"
 import { ConfigService } from "@nestjs/config"
 import axios from "axios"
+import { CreateBusinessDto } from "./dto/create-business.dto"
 
 export interface CreatePackageDto {
-  receieverAgentID_id: number
-  senderAgentID_id: number
+  receiverAgentId: number
+  senderAgentId: number
   packageValue: number
   customerName: string
   packageName: string
@@ -23,11 +24,49 @@ export interface PackageResponse {
     packageName: string
     state: string
     receipt_no: string
-    receieverAgentID_id: number
-    senderAgentID_id: number
+    receieverAgentID_id: number  // Note: API has typo in field name
+    senderAgentID_id: number     // Note: API has typo in field name
     businessId_id: number
     delivery_fee: number
     type: string
+    payment_status?: string
+    trackId?: string
+    trackingLink?: string
+    agent_package_tracks?: {
+      descriptions: Array<{
+        time: number
+        state: string
+        createdAt: string
+        descriptions: string
+      }>
+    }
+  }
+}
+
+export interface BusinessCategory {
+  id: number
+  name: string
+}
+
+export interface BusinessCategoryResponse {
+  totalCount: number
+  pageNumber: number
+  pageSize: number
+  data: BusinessCategory[]
+}
+
+// Moved to dto/create-business.dto.ts
+
+export interface BusinessResponse {
+  data: {
+    id: number
+    name: string
+    phone_number: string
+    createdAt: string
+    business_categories: {
+      id: number
+      name: string
+    }
   }
 }
 
@@ -40,23 +79,18 @@ export interface PackageResponse {
 export class PickupMtaaniService {
   private readonly logger = new Logger(PickupMtaaniService.name)
   private readonly apiKey: string
-  private readonly businessId: string
+  // Removed global businessId - now using retailer-specific business IDs
   private readonly baseUrl: string
 
   constructor(private configService: ConfigService) {
     this.apiKey = this.configService.get<string>("PICKUP_MTAANI_API_KEY")
-    this.businessId = this.configService.get<string>(
-      "PICKUP_MTAANI_BUSINESS_ID"
-    )
     this.baseUrl =
       this.configService.get<string>("PICKUP_MTAANI_BASE_URL") ||
-      "https://staging7.dev.pickupmtaani.com/api/v1"
+      "https://staging7.dev.pickupmtaani.com/api/vv1"
 
-    if (!this.apiKey || !this.businessId) {
-      this.logger.error("❌ Pick Up Mtaani credentials not configured")
-      this.logger.error(
-        "Please set PICKUP_MTAANI_API_KEY and PICKUP_MTAANI_BUSINESS_ID in .env"
-      )
+    if (!this.apiKey) {
+      this.logger.error("❌ Pick Up Mtaani API key not configured")
+      this.logger.error("Please set PICKUP_MTAANI_API_KEY in .env")
     } else {
       this.logger.log("✅ Pick Up Mtaani service initialized")
     }
@@ -65,9 +99,10 @@ export class PickupMtaaniService {
   /**
    * Create a shipping package for retailer product orders
    * @param packageData Package creation details
+   * @param businessId Pickup Mtaani business ID for the retailer
    * @returns Package response with tracking info
    */
-  async createPackage(packageData: CreatePackageDto): Promise<PackageResponse> {
+  async createPackage(packageData: CreatePackageDto, businessId: string): Promise<PackageResponse> {
     try {
       this.logger.log(
         "📦 [CREATE_PACKAGE] =========================================="
@@ -89,16 +124,19 @@ export class PickupMtaaniService {
         `📦 [CREATE_PACKAGE] Phone: ${packageData.customerPhoneNumber}`
       )
       this.logger.log(
-        `📦 [CREATE_PACKAGE] Sender Agent ID: ${packageData.senderAgentID_id}`
+        `📦 [CREATE_PACKAGE] Sender Agent ID: ${packageData.senderAgentId}`
       )
       this.logger.log(
-        `📦 [CREATE_PACKAGE] Receiver Agent ID: ${packageData.receieverAgentID_id}`
+        `📦 [CREATE_PACKAGE] Receiver Agent ID: ${packageData.receiverAgentId}`
       )
       this.logger.log(
         `📦 [CREATE_PACKAGE] Payment Option: ${packageData.paymentOption}`
       )
+      this.logger.log(
+        `📦 [CREATE_PACKAGE] Business ID: ${businessId}`
+      )
 
-      const url = `${this.baseUrl}/packages/agent-agent?b_id=${this.businessId}`
+      const url = `${this.baseUrl}/packages/agent-agent?b_id=${businessId}`
 
       this.logger.log(`📦 [CREATE_PACKAGE] API URL: ${url}`)
 
@@ -171,16 +209,65 @@ export class PickupMtaaniService {
   }
 
   /**
-   * Get package status (for future implementation)
+   * Validate retailer's Pickup Mtaani business ID
+   * @param retailerProfile Retailer profile data
+   * @returns Validation result with business ID or error message
+   */
+  validateRetailerBusinessId(retailerProfile: any): { valid: boolean; businessId?: string; error?: string } {
+    try {
+      // Check if pickupMtaaniBusinessDetails exists
+      if (!retailerProfile.pickupMtaaniBusinessDetails) {
+        return {
+          valid: false,
+          error: 'Retailer has not completed Pickup Mtaani business setup'
+        }
+      }
+
+      const businessDetails = retailerProfile.pickupMtaaniBusinessDetails
+      
+      // Check for businessId or id field
+      const businessId = businessDetails.businessId || businessDetails.id
+      
+      if (!businessId) {
+        return {
+          valid: false,
+          error: 'Pickup Mtaani business ID not found in retailer profile'
+        }
+      }
+
+      // Validate business ID format (should be a number)
+      if (typeof businessId !== 'number' && !/^\d+$/.test(String(businessId))) {
+        return {
+          valid: false,
+          error: 'Invalid Pickup Mtaani business ID format'
+        }
+      }
+
+      return {
+        valid: true,
+        businessId: String(businessId)
+      }
+    } catch (error) {
+      this.logger.error('Error validating retailer business ID:', error)
+      return {
+        valid: false,
+        error: 'Error validating Pickup Mtaani business ID'
+      }
+    }
+  }
+
+  /**
+   * Get package status using business ID and package ID
    * @param packageId Pick Up Mtaani package ID
+   * @param businessId Pickup Mtaani business ID for the retailer
    * @returns Package status details
    */
-  async getPackageStatus(packageId: number): Promise<any> {
+  async getPackageStatus(packageId: number, businessId: string): Promise<any> {
     try {
       this.logger.log(`📦 Fetching status for package ${packageId}`)
 
       const response = await axios.get(
-        `${this.baseUrl}/packages/${packageId}?b_id=${this.businessId}`,
+        `${this.baseUrl}/packages/agent-agent?id=${packageId}&b_id=${businessId}`,
         {
           headers: {
             accept: "application/json",
@@ -233,16 +320,22 @@ export class PickupMtaaniService {
 
   /**
    * Get all packages for the business from Pick Up Mtaani
+   * @param businessId The Pickup Mtaani business ID (required)
    * @returns Array of packages with current status
    */
-  async getAllBusinessPackages(): Promise<any[]> {
+  async getAllBusinessPackages(businessId: string): Promise<any[]> {
     try {
+      if (!businessId) {
+        this.logger.warn("⚠️ [GET_PACKAGES] No business ID provided - cannot fetch packages")
+        return []
+      }
+
       this.logger.log(
-        "📦 [GET_PACKAGES] Fetching all packages from Pick Up Mtaani..."
+        `📦 [GET_PACKAGES] Fetching all packages from Pick Up Mtaani for business ${businessId}...`
       )
 
       const response = await axios.get(
-        `${this.baseUrl}/packages/my-unpaid-packages?b_id=${this.businessId}`,
+        `${this.baseUrl}/packages/my-unpaid-packages?b_id=${businessId}`,
         {
           headers: {
             accept: "application/json",
@@ -270,10 +363,10 @@ export class PickupMtaaniService {
    * @param identifier Package ID or receipt number
    * @returns Package details with current status
    */
-  async getPackageByIdentifier(identifier: string | number): Promise<any> {
+  async getPackageByIdentifier(identifier: string | number, businessId: string): Promise<any> {
     try {
       // First try to get from all packages
-      const allPackages = await this.getAllBusinessPackages()
+      const allPackages = await this.getAllBusinessPackages(businessId)
 
       // Search by package ID or receipt number
       const packageData = allPackages.find(
@@ -288,7 +381,7 @@ export class PickupMtaaniService {
       }
 
       // If not found in unpaid packages, try direct fetch
-      return await this.getPackageStatus(Number(identifier))
+      return await this.getPackageStatus(Number(identifier), businessId)
     } catch (error) {
       this.logger.error(
         `❌ Failed to fetch package ${identifier}:`,
@@ -390,10 +483,10 @@ export class PickupMtaaniService {
   /**
    * Get current webhook configuration (if Pick Up Mtaani provides this)
    */
-  async getWebhookConfig(): Promise<any> {
+  async getWebhookConfig(businessId: string): Promise<any> {
     try {
       const response = await axios.get(
-        `${this.baseUrl}/webhooks?b_id=${this.businessId}`,
+        `${this.baseUrl}/webhooks?b_id=${businessId}`,
         {
           headers: {
             accept: "application/json",
@@ -412,6 +505,73 @@ export class PickupMtaaniService {
       return {
         success: false,
         error: "Get webhook config endpoint not available",
+      }
+    }
+  }
+
+  /**
+   * Get business categories from Pickup Mtaani
+   */
+  async getBusinessCategories(): Promise<{
+    success: boolean
+    data?: BusinessCategory[]
+    error?: string
+  }> {
+    try {
+      this.logger.log(`[BUSINESS] Fetching business categories`)
+
+      const response = await axios.get(
+        `${this.baseUrl}/businesses/categories`,
+        {
+          headers: {
+            accept: "application/json",
+          },
+          timeout: 10000,
+        }
+      )
+
+      this.logger.log(`✅ [BUSINESS] Categories fetched successfully`)
+      return { success: true, data: response.data.data }
+    } catch (error) {
+      this.logger.error(`❌ [BUSINESS] Failed to fetch categories:`, error)
+      return {
+        success: false,
+        error: error.response?.data?.message || "Failed to fetch business categories",
+      }
+    }
+  }
+
+  /**
+   * Create business on Pickup Mtaani
+   */
+  async createBusiness(createBusinessDto: CreateBusinessDto): Promise<{
+    success: boolean
+    data?: BusinessResponse["data"]
+    error?: string
+  }> {
+    try {
+      this.logger.log(`[BUSINESS] Creating business: ${createBusinessDto.name}`)
+
+      const response = await axios.post(
+        `${this.baseUrl}/businesses/create`,
+        createBusinessDto,
+        {
+          headers: {
+            accept: "application/json",
+            "Content-Type": "application/json",
+            "apiKey": this.apiKey,
+          },
+          timeout: 10000,
+        }
+      )
+
+      this.logger.log(`✅ [BUSINESS] Business created successfully: ${response.data.data.id}`)
+      return { success: true, data: response.data.data }
+    } catch (error) {
+      this.logger.error(`❌ [BUSINESS] Failed to create business:`, error)
+      return {
+        success: false,
+        error: error.response?.data?.message || "Failed to create business",
       }
     }
   }

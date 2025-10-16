@@ -222,7 +222,7 @@ export class AnalyticsService {
         FROM products p
         LEFT JOIN order_items oi ON p.id = oi.product_id
         LEFT JOIN orders o ON oi.order_id = o.id 
-          AND o.status IN ('confirmed', 'processing', 'shipped', 'delivered')
+          AND o.status IN ('paid', 'ready_for_shipping', 'in_transit', 'shipped', 'delivered')
           AND o.retailer_id = ${retailerId}
         WHERE p.retailer_id = ${retailerId}
         GROUP BY p.id, p.name, p.image_url, p.price, p.stock_quantity
@@ -1190,7 +1190,7 @@ export class AnalyticsService {
       // Get all orders in the date range (confirmed/shipped/delivered/completed orders for revenue calculation)
       const orders = await this.prisma.order.findMany({
         where: {
-          status: { in: ['confirmed', 'shipped', 'delivered', 'completed'] },
+          status: { in: ['paid', 'ready_for_shipping', 'in_transit', 'shipped', 'delivered', 'completed'] },
           createdAt: { gte: startDate }
         },
         select: {

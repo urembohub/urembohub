@@ -1564,4 +1564,379 @@ export class EmailService {
       console.error(`❌ [EMAIL] Failed to send vendor refund notification email:`, error);
     }
   }
+
+  /**
+   * Send email notification to retailer about failed package creation
+   */
+  async sendRetailerPackageCreationFailedEmail(
+    retailerEmail: string,
+    retailerName: string,
+    orderId: string,
+    reason: string
+  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    try {
+      const template = this.getRetailerPackageCreationFailedTemplate(
+        retailerName,
+        orderId,
+        reason
+      );
+      
+      const result = await this.sendEmail({
+        to: retailerEmail,
+        subject: `Package Creation Failed - Order ${orderId}`,
+        html: template,
+      });
+      
+      console.log(`✅ [EMAIL] Retailer package creation failed notification sent to: ${retailerEmail}`);
+      return { success: true, messageId: result.messageId };
+    } catch (error) {
+      console.error(`❌ [EMAIL] Failed to send retailer package creation failed notification:`, error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Send email notification to client about partial order shipping issues
+   */
+  async sendClientPartialOrderShippingEmail(
+    clientEmail: string,
+    clientName: string,
+    orderId: string,
+    failedRetailers: any[]
+  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    try {
+      const template = this.getClientPartialOrderShippingTemplate(
+        clientName,
+        orderId,
+        failedRetailers
+      );
+      
+      const result = await this.sendEmail({
+        to: clientEmail,
+        subject: `Partial Shipping Issue - Order ${orderId}`,
+        html: template,
+      });
+      
+      console.log(`✅ [EMAIL] Client partial order shipping notification sent to: ${clientEmail}`);
+      return { success: true, messageId: result.messageId };
+    } catch (error) {
+      console.error(`❌ [EMAIL] Failed to send client partial order shipping notification:`, error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Get retailer package creation failed email template
+   */
+  private getRetailerPackageCreationFailedTemplate(
+    retailerName: string,
+    orderId: string,
+    reason: string
+  ): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Package Creation Failed</title>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: #dc3545; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+          .content { background: #f8f9fa; padding: 30px; border-radius: 0 0 8px 8px; }
+          .alert { background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 5px; margin: 20px 0; }
+          .button { display: inline-block; background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin: 20px 0; }
+          .footer { text-align: center; margin-top: 30px; color: #666; font-size: 14px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>⚠️ Package Creation Failed</h1>
+          </div>
+          <div class="content">
+            <h2>Hello ${retailerName},</h2>
+            
+            <p>We encountered an issue while creating a shipping package for your order <strong>${orderId}</strong>.</p>
+            
+            <div class="alert">
+              <h3>Issue Details:</h3>
+              <p><strong>Reason:</strong> ${reason}</p>
+              <p><strong>Action Required:</strong> You need to complete your Pickup Mtaani business setup to enable package creation.</p>
+            </div>
+            
+            <h3>What You Need to Do:</h3>
+            <ol>
+              <li>Log into your account</li>
+              <li>Complete the Pickup Mtaani business registration in your profile</li>
+              <li>Ensure all required business details are provided</li>
+              <li>Contact support if you need assistance</li>
+            </ol>
+            
+            <p>Once you complete the setup, future orders will be processed automatically.</p>
+            
+            <a href="${process.env.FRONTEND_URL || 'http://localhost:8080'}/profile" class="button">
+              Complete Business Setup
+            </a>
+            
+            <p>If you have any questions, please contact our support team.</p>
+            
+            <div class="footer">
+              <p>Best regards,<br>The Urembo Hub Team</p>
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  /**
+   * Get client partial order shipping email template
+   */
+  private getClientPartialOrderShippingTemplate(
+    clientName: string,
+    orderId: string,
+    failedRetailers: any[]
+  ): string {
+    const failedRetailersList = failedRetailers.map(retailer => 
+      `<li><strong>${retailer.retailerName}</strong> - ${retailer.items.length} item(s)</li>`
+    ).join('');
+    
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Partial Shipping Issue</title>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: #ffc107; color: #212529; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+          .content { background: #f8f9fa; padding: 30px; border-radius: 0 0 8px 8px; }
+          .alert { background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 5px; margin: 20px 0; }
+          .retailer-list { background: white; padding: 15px; border-radius: 5px; margin: 15px 0; }
+          .footer { text-align: center; margin-top: 30px; color: #666; font-size: 14px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>⚠️ Partial Shipping Issue</h1>
+          </div>
+          <div class="content">
+            <h2>Hello ${clientName},</h2>
+            
+            <p>We're processing your order <strong>${orderId}</strong>, but some items couldn't be shipped immediately due to retailer setup issues.</p>
+            
+            <div class="alert">
+              <h3>What's Happening:</h3>
+              <p>Some retailers in your order haven't completed their shipping setup yet. We're working with them to resolve this quickly.</p>
+            </div>
+            
+            <div class="retailer-list">
+              <h3>Affected Retailers:</h3>
+              <ul>
+                ${failedRetailersList}
+              </ul>
+            </div>
+            
+            <h3>What This Means:</h3>
+            <ul>
+              <li>Your order is being processed</li>
+              <li>Some items will ship immediately</li>
+              <li>Affected items will ship once retailers complete their setup</li>
+              <li>You'll receive updates as items ship</li>
+            </ul>
+            
+            <p><strong>Estimated Resolution:</strong> 24-48 hours</p>
+            
+            <p>We apologize for any inconvenience and appreciate your patience.</p>
+            
+            <div class="footer">
+              <p>Best regards,<br>The Urembo Hub Team</p>
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  /**
+   * Send package delivered notification email
+   */
+  async sendPackageDeliveredEmail(
+    customerEmail: string,
+    customerName: string,
+    orderId: string,
+    receiptNo: string,
+    trackingLink: string
+  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    try {
+      const template = this.getPackageDeliveredTemplate(
+        customerName,
+        orderId,
+        receiptNo,
+        trackingLink
+      );
+      
+      const result = await this.sendEmail({
+        to: customerEmail,
+        subject: `Package Delivered - Order ${orderId}`,
+        html: template,
+      });
+      
+      console.log(`✅ [EMAIL] Package delivered notification sent to: ${customerEmail}`);
+      return { success: true, messageId: result.messageId };
+    } catch (error) {
+      console.error(`❌ [EMAIL] Failed to send package delivered notification:`, error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Send package tracking failed notification email
+   */
+  async sendPackageTrackingFailedEmail(
+    adminEmail: string,
+    orderId: string,
+    packageId: number,
+    retailerName: string,
+    errorMessage: string
+  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    try {
+      const template = this.getPackageTrackingFailedTemplate(
+        orderId,
+        packageId,
+        retailerName,
+        errorMessage
+      );
+      
+      const result = await this.sendEmail({
+        to: adminEmail,
+        subject: `Package Tracking Failed - Order ${orderId}`,
+        html: template,
+      });
+      
+      console.log(`✅ [EMAIL] Package tracking failed notification sent to: ${adminEmail}`);
+      return { success: true, messageId: result.messageId };
+    } catch (error) {
+      console.error(`❌ [EMAIL] Failed to send package tracking failed notification:`, error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Get package delivered email template
+   */
+  private getPackageDeliveredTemplate(
+    customerName: string,
+    orderId: string,
+    receiptNo: string,
+    trackingLink: string
+  ): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Package Delivered</title>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: #28a745; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+          .content { background: #f8f9fa; padding: 30px; border-radius: 0 0 8px 8px; }
+          .success { background: #d4edda; border: 1px solid #c3e6cb; padding: 15px; border-radius: 5px; margin: 20px 0; }
+          .button { display: inline-block; background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin: 20px 0; }
+          .footer { text-align: center; margin-top: 30px; color: #666; font-size: 14px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>🎉 Package Delivered!</h1>
+          </div>
+          <div class="content">
+            <h2>Hello ${customerName},</h2>
+            
+            <div class="success">
+              <h3>Great news! Your package has been delivered successfully.</h3>
+              <p><strong>Order ID:</strong> ${orderId}</p>
+              <p><strong>Receipt No:</strong> ${receiptNo}</p>
+            </div>
+            
+            <p>Your order has been completed and should now be in your possession.</p>
+            
+            <a href="${trackingLink}" class="button" target="_blank">
+              Track Package Details
+            </a>
+            
+            <p>Thank you for choosing Urembo Hub!</p>
+            
+            <div class="footer">
+              <p>Best regards,<br>The Urembo Hub Team</p>
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  /**
+   * Get package tracking failed email template
+   */
+  private getPackageTrackingFailedTemplate(
+    orderId: string,
+    packageId: number,
+    retailerName: string,
+    errorMessage: string
+  ): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Package Tracking Failed</title>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: #dc3545; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+          .content { background: #f8f9fa; padding: 30px; border-radius: 0 0 8px 8px; }
+          .alert { background: #f8d7da; border: 1px solid #f5c6cb; padding: 15px; border-radius: 5px; margin: 20px 0; }
+          .footer { text-align: center; margin-top: 30px; color: #666; font-size: 14px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>⚠️ Package Tracking Failed</h1>
+          </div>
+          <div class="content">
+            <h2>Admin Alert</h2>
+            
+            <div class="alert">
+              <h3>Package tracking has failed after multiple attempts</h3>
+              <p><strong>Order ID:</strong> ${orderId}</p>
+              <p><strong>Package ID:</strong> ${packageId}</p>
+              <p><strong>Retailer:</strong> ${retailerName}</p>
+              <p><strong>Error:</strong> ${errorMessage}</p>
+            </div>
+            
+            <p>Please investigate this issue manually and contact the retailer if necessary.</p>
+            
+            <div class="footer">
+              <p>Urembo Hub System</p>
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
 }

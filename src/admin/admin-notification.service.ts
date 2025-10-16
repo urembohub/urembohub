@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
+import { EmailQueueService } from '../email/email-queue.service';
 
 @Injectable()
 export class AdminNotificationService {
@@ -9,6 +10,7 @@ export class AdminNotificationService {
   constructor(
     private prisma: PrismaService,
     private emailService: EmailService,
+    private emailQueueService: EmailQueueService,
   ) {}
 
   async getAdminEmails(): Promise<string[]> {
@@ -180,40 +182,16 @@ export class AdminNotificationService {
 
   async notifyAdminsOfOnboardingSubmission(submissionData: any): Promise<void> {
     try {
-      console.log('👨‍💼 [ADMIN] Starting onboarding submission notification process...');
-      const adminEmails = await this.getAdminEmails();
+      console.log('👨‍💼 [ADMIN] Queuing onboarding submission notification...');
       
-      if (adminEmails.length === 0) {
-        console.warn('⚠️ [ADMIN] No admin emails found for onboarding submission notification');
-        this.logger.warn('No admin emails found for onboarding submission notification');
-        return;
-      }
-
-      console.log('👨‍💼 [ADMIN] Found admin emails:', adminEmails);
-      console.log('👨‍💼 [ADMIN] Sending onboarding submission notifications for:', submissionData.email);
-
-      // Send notification to all admins
-      const promises = adminEmails.map(async (adminEmail, index) => {
-        console.log(`📧 [ADMIN] Sending onboarding notification ${index + 1}/${adminEmails.length} to: ${adminEmail}`);
-        const result = await this.emailService.sendAdminOnboardingSubmissionEmail(adminEmail, submissionData);
-        
-        if (result.success) {
-          console.log(`✅ [ADMIN] Onboarding notification sent successfully to ${adminEmail} (ID: ${result.messageId})`);
-        } else {
-          console.error(`❌ [ADMIN] Onboarding notification failed to ${adminEmail}:`, result.error);
-        }
-        
-        return result;
-      });
-
-      const results = await Promise.all(promises);
-      const successCount = results.filter(r => r.success).length;
+      // Queue the email notification instead of sending it immediately
+      await this.emailQueueService.addOnboardingSubmissionNotification(submissionData);
       
-      console.log(`📊 [ADMIN] Onboarding notification summary: ${successCount}/${adminEmails.length} successful`);
-      this.logger.log(`Onboarding submission notification sent to ${adminEmails.length} admins for user: ${submissionData.email}`);
+      console.log('✅ [ADMIN] Onboarding submission notification queued successfully');
+      this.logger.log(`Onboarding submission notification queued for user: ${submissionData.email}`);
     } catch (error) {
-      console.error('❌ [ADMIN] Error sending onboarding submission notification to admins:', error);
-      this.logger.error('Error sending onboarding submission notification to admins:', error);
+      console.error('❌ [ADMIN] Error queuing onboarding submission notification:', error);
+      this.logger.error('Error queuing onboarding submission notification:', error);
     }
   }
 }

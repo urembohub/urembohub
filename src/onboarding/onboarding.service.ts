@@ -18,6 +18,13 @@ import { UpdateRequirementDto } from "./dto/update-requirement.dto"
 import { SubmitRequirementDto } from "./dto/submit-requirement.dto"
 import { ReviewSubmissionDto } from "./dto/review-submission.dto"
 import { BulkSubmitDto } from "./dto/bulk-submit.dto"
+import { 
+  SaveRequirementsStepDto, 
+  SaveBusinessInfoStepDto, 
+  SavePaymentDetailsStepDto, 
+  SaveDeliveryDetailsStepDto,
+  StepDataResponseDto 
+} from "./dto/save-step.dto"
 
 @Injectable()
 export class OnboardingService {
@@ -144,11 +151,33 @@ export class OnboardingService {
       })
 
       // Create a mock submission for consistency with the frontend
+      // Flatten the delivery data structure to match frontend expectations
+      const deliveryDetails = deliveryData.deliveryDetails as any || {}
+      
+      // Check if data is already flattened (has areaId, agentId, etc. at top level)
+      const isAlreadyFlattened = deliveryDetails.areaId || deliveryDetails.agentId || deliveryDetails.areaName
+      
+      let flattenedDeliveryData
+      if (isAlreadyFlattened) {
+        // Data is already flattened, use as is
+        flattenedDeliveryData = {
+          deliveryMethod: deliveryData.deliveryMethod,
+          ...deliveryDetails
+        }
+      } else {
+        // Data is double-nested, extract from nested deliveryDetails
+        const nestedDetails = deliveryDetails.deliveryDetails || {}
+        flattenedDeliveryData = {
+          deliveryMethod: deliveryData.deliveryMethod,
+          ...nestedDetails
+        }
+      }
+      
       const mockSubmission = {
         id: "delivery_details_" + Date.now(),
         userId,
         requirementId: "delivery_details",
-        value: deliveryDataJson,
+        value: JSON.stringify(flattenedDeliveryData),
         fileUrl: null,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -330,87 +359,79 @@ export class OnboardingService {
     if (hasSuccessfulSubmissions) {
       const user = await this.prisma.profile.findUnique({
         where: { id: userId },
-        select: { onboardingStatus: true, role: true },
+        select: { 
+          onboardingStatus: true, 
+          role: true,
+          businessName: true,
+          businessPhone: true,
+          pickupMtaaniBusinessDetails: true,
+          paymentAccountType: true,
+          paymentAccountDetails: true,
+          paystackSubaccountId: true,
+          deliveryMethod: true,
+          deliveryDetails: true
+        },
       })
 
       if (user) {
-        // Get all active requirements for this user's role
-        const requirements = await this.prisma.onboardingRequirement.findMany({
-          where: {
-            role: user.role as any,
-            isActive: true,
-          },
-        })
-
-        // Get all submissions for this user
-        const submissions = await this.prisma.onboardingSubmission.findMany({
-          where: { userId },
-        })
-
-        // Check if all mandatory requirements are completed
-        const mandatoryRequirements = requirements.filter(
-          (req) => req.isMandatory
-        )
-        const completedMandatory = mandatoryRequirements.filter((req) =>
-          submissions.some(
-            (sub) => sub.requirementId === req.id && (sub.value || sub.fileUrl)
-          )
-        )
-
-        console.log("🔍 [ONBOARDING] Debug - Requirements check:")
-        console.log("  - Total requirements:", requirements.length)
-        console.log("  - Mandatory requirements:", mandatoryRequirements.length)
-        console.log("  - Completed mandatory:", completedMandatory.length)
-        console.log("  - User role:", user.role)
-
-        const oldStatus = user.onboardingStatus
-        let newStatus = user.onboardingStatus
-
-        // If all mandatory requirements are completed, change status to submitted
-        if (completedMandatory.length === mandatoryRequirements.length) {
-          newStatus = "submitted"
-
-          // Update user status
-          const updatedUser = await this.prisma.profile.update({
-            where: { id: userId },
-            data: { onboardingStatus: newStatus },
-          })
-
-          // Log status change
-          await this.onboardingHistoryService.logStatusChange(
-            userId,
-            oldStatus,
-            newStatus,
-            "All mandatory requirements completed"
-          )
-
-          // Send admin notification for new submission
-          console.log(
-            "📧 [ONBOARDING] Sending admin notification for new submission..."
-          )
-          try {
-            await this.adminNotificationService.notifyAdminsOfOnboardingSubmission(
-              {
-                businessName: updatedUser.businessName,
-                fullName: updatedUser.fullName,
-                email: updatedUser.email,
-                role: updatedUser.role,
-                submittedAt: new Date().toLocaleDateString(),
-              }
-            )
-            console.log("✅ [ONBOARDING] Admin notification sent successfully!")
-          } catch (error) {
-            console.error(
-              "❌ [ONBOARDING] Failed to send admin notification:",
-              error
-            )
-            // Don't fail the submission if admin notification fails
+        // Comprehensive validation before submission
+        const validationResult = await this.validateCompleteOnboarding(userId, user)
+        
+        if (!validationResult.isValid) {
+          console.warn(`⚠️ [ONBOARDING] Validation failed for user ${userId}:`, validationResult.errors)
+          return {
+            success: false,
+            error: 'Incomplete onboarding requirements',
+            details: validationResult.errors,
+            results
           }
         }
+
+        // If all validations pass, update status to submitted
+        const oldStatus = user.onboardingStatus
+        const newStatus = "submitted"
+
+        const updatedUser = await this.prisma.profile.update({
+          where: { id: userId },
+          data: { onboardingStatus: newStatus },
+        })
+
+        // Log status change
+        await this.onboardingHistoryService.logStatusChange(
+          userId,
+          oldStatus,
+          newStatus,
+          "All onboarding requirements completed and validated"
+        )
+
+        // Send admin notification for new submission (queued, non-blocking)
+        console.log("📧 [ONBOARDING] Queuing admin notification for new submission...")
+        this.adminNotificationService.notifyAdminsOfOnboardingSubmission(
+          {
+            businessName: updatedUser.businessName,
+            fullName: updatedUser.fullName,
+            email: updatedUser.email,
+            role: updatedUser.role,
+            submittedAt: new Date().toLocaleDateString(),
+          }
+        ).then(() => {
+          console.log("✅ [ONBOARDING] Admin notification queued successfully!")
+        }).catch((error) => {
+          console.error(
+            "❌ [ONBOARDING] Failed to queue admin notification:",
+            error
+          )
+          // Don't fail the submission if admin notification fails
+        })
+
+        console.log(`✅ [ONBOARDING] User ${userId} onboarding completed successfully`)
       }
     }
 
-    return results
+    return {
+      success: true,
+      results
+    }
   }
 
   async getUserSubmissions(userId: string) {
@@ -515,11 +536,36 @@ export class OnboardingService {
         deliveryProfile.deliveryDetails
       )
 
+      // Flatten the delivery data structure to match frontend expectations
+      const deliveryDetails = deliveryProfile.deliveryDetails as any || {}
+      console.log("🚚 Backend: Raw delivery details from profile:", deliveryDetails)
+      
+      // Check if data is already flattened (has areaId, agentId, etc. at top level)
+      const isAlreadyFlattened = deliveryDetails.areaId || deliveryDetails.agentId || deliveryDetails.areaName
+      
+      let flattenedDeliveryData
+      if (isAlreadyFlattened) {
+        // Data is already flattened, use as is
+        flattenedDeliveryData = {
+          deliveryMethod: deliveryProfile.deliveryMethod,
+          ...deliveryDetails
+        }
+      } else {
+        // Data is double-nested, extract from nested deliveryDetails
+        const nestedDetails = deliveryDetails.deliveryDetails || {}
+        flattenedDeliveryData = {
+          deliveryMethod: deliveryProfile.deliveryMethod,
+          ...nestedDetails
+        }
+      }
+      
+      console.log("🚚 Backend: Flattened delivery data:", flattenedDeliveryData)
+
       const deliverySubmission = {
         id: "delivery_details_" + userId,
         userId,
         requirementId: "delivery_details",
-        value: JSON.stringify(deliveryProfile.deliveryDetails),
+        value: JSON.stringify(flattenedDeliveryData),
         fileUrl: null,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -956,5 +1002,500 @@ export class OnboardingService {
 
   async getUserHistory(userId: string) {
     return this.onboardingHistoryService.getUserHistory(userId);
+  }
+
+  /**
+   * Save Pickup Mtaani business details to user profile
+   */
+  async getPickupMtaaniBusiness(userId: string) {
+    try {
+      const user = await this.prisma.profile.findUnique({
+        where: { id: userId },
+        select: { pickupMtaaniBusinessDetails: true }
+      })
+
+      if (user?.pickupMtaaniBusinessDetails) {
+        return {
+          success: true,
+          data: user.pickupMtaaniBusinessDetails
+        }
+      }
+
+      return {
+        success: true,
+        data: null
+      }
+    } catch (error) {
+      console.error('Error getting Pickup Mtaani business details:', error)
+      return {
+        success: false,
+        error: 'Failed to get business details'
+      }
+    }
+  }
+
+  async savePickupMtaaniBusiness(userId: string, businessData: {
+    businessId: number
+    businessName: string
+    phoneNumber: string
+    categoryId: number
+    categoryName: string
+  }) {
+    try {
+      // Update user profile with Pickup Mtaani business details
+      const updatedUser = await this.prisma.profile.update({
+        where: { id: userId },
+        data: {
+          pickupMtaaniBusinessDetails: {
+            id: businessData.businessId,
+            name: businessData.businessName,
+            phoneNumber: businessData.phoneNumber,
+            categoryId: businessData.categoryId,
+            categoryName: businessData.categoryName,
+            createdAt: new Date().toISOString(),
+          }
+        }
+      })
+
+      return {
+        success: true,
+        data: updatedUser
+      }
+    } catch (error) {
+      console.error('Error saving Pickup Mtaani business details:', error)
+      return {
+        success: false,
+        error: 'Failed to save business details'
+      }
+    }
+  }
+
+  /**
+   * Get onboarding settings
+   */
+  async getOnboardingSettings() {
+    try {
+      let settings = await this.prisma.onboardingSettings.findFirst()
+      
+      if (!settings) {
+        // Create default settings if none exist
+        settings = await this.prisma.onboardingSettings.create({
+          data: {
+            useMultiStepForm: false
+          }
+        })
+      }
+
+      return {
+        success: true,
+        data: settings
+      }
+    } catch (error) {
+      console.error('Error fetching onboarding settings:', error)
+      return {
+        success: false,
+        error: 'Failed to fetch settings'
+      }
+    }
+  }
+
+  /**
+   * Update onboarding settings
+   */
+  async updateOnboardingSettings(settingsData: { useMultiStepForm: boolean }) {
+    try {
+      let settings = await this.prisma.onboardingSettings.findFirst()
+      
+      if (!settings) {
+        settings = await this.prisma.onboardingSettings.create({
+          data: settingsData
+        })
+      } else {
+        settings = await this.prisma.onboardingSettings.update({
+          where: { id: settings.id },
+          data: settingsData
+        })
+      }
+
+      return {
+        success: true,
+        data: settings
+      }
+    } catch (error) {
+      console.error('Error updating onboarding settings:', error)
+      return {
+        success: false,
+        error: 'Failed to update settings'
+      }
+    }
+  }
+
+  /**
+   * Validate retailer's Pickup Mtaani business ID
+   * @param userProfile User profile data
+   * @returns Validation result with business ID or error message
+   */
+  private validateRetailerBusinessId(userProfile: any): { valid: boolean; businessId?: string; error?: string } {
+    try {
+      // Check if pickupMtaaniBusinessDetails exists
+      if (!userProfile.pickupMtaaniBusinessDetails) {
+        return {
+          valid: false,
+          error: 'Retailer has not completed Pickup Mtaani business setup'
+        }
+      }
+
+      const businessDetails = userProfile.pickupMtaaniBusinessDetails
+      
+      // Check for businessId or id field
+      const businessId = businessDetails.businessId || businessDetails.id
+      
+      if (!businessId) {
+        return {
+          valid: false,
+          error: 'Pickup Mtaani business ID not found in retailer profile'
+        }
+      }
+
+      // Validate business ID format (should be a number)
+      if (typeof businessId !== 'number' && !/^\d+$/.test(String(businessId))) {
+        return {
+          valid: false,
+          error: 'Invalid Pickup Mtaani business ID format'
+        }
+      }
+
+      return {
+        valid: true,
+        businessId: String(businessId)
+      }
+    } catch (error) {
+      console.error('Error validating retailer business ID:', error)
+      return {
+        valid: false,
+        error: 'Error validating Pickup Mtaani business ID'
+      }
+    }
+  }
+
+  /**
+   * Comprehensive validation of complete onboarding
+   */
+  private async validateCompleteOnboarding(userId: string, userProfile: any): Promise<{ isValid: boolean; errors: string[] }> {
+    const errors: string[] = []
+
+    try {
+      console.log(`🔍 [VALIDATION] Starting comprehensive validation for user ${userId}`)
+
+      // 1. Validate mandatory requirements
+      const requirements = await this.prisma.onboardingRequirement.findMany({
+        where: {
+          role: userProfile.role as any,
+          isActive: true,
+        },
+      })
+
+      const submissions = await this.prisma.onboardingSubmission.findMany({
+        where: { userId },
+      })
+
+      const mandatoryRequirements = requirements.filter(req => req.isMandatory)
+      const completedMandatory = mandatoryRequirements.filter(req =>
+        submissions.some(sub => sub.requirementId === req.id && (sub.value || sub.fileUrl))
+      )
+
+      if (completedMandatory.length !== mandatoryRequirements.length) {
+        errors.push(`Missing ${mandatoryRequirements.length - completedMandatory.length} mandatory requirements`)
+      }
+
+      // 2. Validate payment details (required for all users)
+      if (!userProfile.paymentAccountType) {
+        errors.push('Payment account type is required')
+      }
+      if (!userProfile.paymentAccountDetails || Object.keys(userProfile.paymentAccountDetails).length === 0) {
+        errors.push('Payment account details are required')
+      }
+      if (!userProfile.paystackSubaccountId) {
+        errors.push('Paystack sub-account must be created')
+      }
+
+      // 3. Validate retailer-specific requirements
+      if (userProfile.role === 'retailer') {
+        // Business information
+        if (!userProfile.businessName) {
+          errors.push('Business name is required for retailers')
+        }
+        if (!userProfile.businessPhone) {
+          errors.push('Business phone is required for retailers')
+        }
+
+        // Pickup Mtaani business ID
+        const businessIdValidation = this.validateRetailerBusinessId(userProfile)
+        if (!businessIdValidation.valid) {
+          errors.push(businessIdValidation.error || 'Pickup Mtaani business setup is incomplete')
+        }
+
+        // Delivery details
+        if (!userProfile.deliveryMethod) {
+          errors.push('Delivery method is required for retailers')
+        }
+        if (!userProfile.deliveryDetails || Object.keys(userProfile.deliveryDetails).length === 0) {
+          errors.push('Delivery details are required for retailers')
+        }
+      }
+
+      console.log(`🔍 [VALIDATION] Validation complete for user ${userId}:`, {
+        isValid: errors.length === 0,
+        errorCount: errors.length,
+        errors: errors
+      })
+
+      return {
+        isValid: errors.length === 0,
+        errors
+      }
+    } catch (error) {
+      console.error('❌ [VALIDATION] Error during validation:', error)
+      return {
+        isValid: false,
+        errors: ['Validation error occurred']
+      }
+    }
+  }
+
+  /**
+   * Reset onboarding status for a user
+   * @param userId User ID
+   * @param status New status to set
+   */
+  async resetOnboardingStatus(userId: string, status: string) {
+    try {
+      console.log(`🔄 [ONBOARDING] Resetting status for user ${userId} to: ${status}`)
+      
+      const updatedUser = await this.prisma.profile.update({
+        where: { id: userId },
+        data: { 
+          onboardingStatus: status as any
+        }
+      })
+
+      console.log(`✅ [ONBOARDING] Status reset successfully for user ${userId}`)
+      
+      return {
+        success: true,
+        data: updatedUser
+      }
+    } catch (error) {
+      console.error('❌ [ONBOARDING] Error resetting onboarding status:', error)
+      return {
+        success: false,
+        error: 'Failed to reset onboarding status'
+      }
+    }
+  }
+
+  // Step-level save methods
+  async saveRequirementsStep(userId: string, dto: SaveRequirementsStepDto) {
+    try {
+      console.log(`💾 [STEP] Saving requirements step for user ${userId}`)
+      
+      // Save each requirement individually
+      const results = []
+      for (const [requirementId, value] of Object.entries(dto.requirements)) {
+        const submission = await this.submitRequirement(userId, {
+          requirementId,
+          value: typeof value === 'string' ? value : undefined,
+          fileUrl: typeof value === 'string' && value.startsWith('http') ? value : undefined
+        })
+        results.push(submission)
+      }
+      
+      console.log(`✅ [STEP] Requirements step saved for user ${userId}`)
+      return { success: true, data: results }
+    } catch (error) {
+      console.error('❌ [STEP] Error saving requirements step:', error)
+      throw error
+    }
+  }
+
+  async saveBusinessInfoStep(userId: string, dto: SaveBusinessInfoStepDto) {
+    try {
+      console.log(`💾 [STEP] Saving business info step for user ${userId}`)
+      
+      const businessDetails = {
+        businessId: dto.pickupMtaaniBusinessId,
+        businessName: dto.pickupMtaaniBusinessName,
+        categoryId: dto.categoryId,
+        categoryName: dto.categoryName,
+        phoneNumber: dto.phoneNumber
+      }
+      
+      const updatedUser = await this.prisma.profile.update({
+        where: { id: userId },
+        data: {
+          businessName: dto.businessName,
+          businessPhone: dto.phoneNumber,
+          pickupMtaaniBusinessDetails: businessDetails
+        }
+      })
+      
+      console.log(`✅ [STEP] Business info step saved for user ${userId}`)
+      return { success: true, data: updatedUser }
+    } catch (error) {
+      console.error('❌ [STEP] Error saving business info step:', error)
+      throw error
+    }
+  }
+
+  async savePaymentDetailsStep(userId: string, dto: SavePaymentDetailsStepDto) {
+    try {
+      console.log(`💾 [STEP] Saving payment details step for user ${userId}`)
+      
+      const updatedUser = await this.prisma.profile.update({
+        where: { id: userId },
+        data: {
+          paymentAccountType: dto.paymentAccountType,
+          paymentAccountDetails: dto.paymentAccountDetails,
+          paystackSubaccountId: dto.paystackSubaccountId
+        }
+      })
+      
+      console.log(`✅ [STEP] Payment details step saved for user ${userId}`)
+      return { success: true, data: updatedUser }
+    } catch (error) {
+      console.error('❌ [STEP] Error saving payment details step:', error)
+      throw error
+    }
+  }
+
+  async saveDeliveryDetailsStep(userId: string, dto: SaveDeliveryDetailsStepDto) {
+    try {
+      console.log(`💾 [STEP] Saving delivery details step for user ${userId}`)
+      
+      const updatedUser = await this.prisma.profile.update({
+        where: { id: userId },
+        data: {
+          deliveryMethod: dto.deliveryMethod,
+          deliveryDetails: dto.deliveryDetails
+        }
+      })
+      
+      console.log(`✅ [STEP] Delivery details step saved for user ${userId}`)
+      return { success: true, data: updatedUser }
+    } catch (error) {
+      console.error('❌ [STEP] Error saving delivery details step:', error)
+      throw error
+    }
+  }
+
+  async getAllStepData(userId: string): Promise<StepDataResponseDto> {
+    try {
+      console.log(`📋 [STEP] Fetching all step data for user ${userId}`)
+      
+      // Get user profile with all relevant data
+      const profile = await this.prisma.profile.findUnique({
+        where: { id: userId },
+        select: {
+          role: true,
+          businessName: true,
+          businessPhone: true,
+          pickupMtaaniBusinessDetails: true,
+          paymentAccountType: true,
+          paymentAccountDetails: true,
+          paystackSubaccountId: true,
+          deliveryMethod: true,
+          deliveryDetails: true
+        }
+      })
+
+      if (!profile) {
+        throw new NotFoundException('User profile not found')
+      }
+
+      // Get requirements submissions
+      const submissions = await this.prisma.onboardingSubmission.findMany({
+        where: { userId },
+        include: { requirement: true }
+      })
+
+      // Build requirements object
+      const requirements: Record<string, any> = {}
+      submissions.forEach(sub => {
+        requirements[sub.requirementId] = sub.fileUrl || sub.value
+      })
+
+      // Build response
+      const response: StepDataResponseDto = {
+        requirements,
+        completedSteps: [],
+        currentStep: 1
+      }
+
+      // Check which steps are completed
+      const hasRequirements = Object.keys(requirements).length > 0
+      if (hasRequirements) {
+        response.completedSteps.push(1)
+      }
+
+      // Business info step (retailers only)
+      if (profile.role === 'retailer') {
+        const businessDetails = profile.pickupMtaaniBusinessDetails as any
+        const hasBusinessInfo = profile.businessName && 
+          profile.businessPhone && 
+          businessDetails?.businessId
+        if (hasBusinessInfo) {
+          response.completedSteps.push(2)
+          response.businessInfo = {
+            businessName: profile.businessName,
+            phoneNumber: profile.businessPhone,
+            categoryId: businessDetails?.categoryId || 0,
+            categoryName: businessDetails?.categoryName || '',
+            pickupMtaaniBusinessId: businessDetails?.businessId,
+            pickupMtaaniBusinessName: businessDetails?.businessName
+          }
+        }
+      }
+
+      // Payment details step
+      const hasPaymentDetails = profile.paymentAccountType && 
+        profile.paymentAccountDetails && 
+        profile.paystackSubaccountId
+      if (hasPaymentDetails) {
+        const paymentStep = profile.role === 'retailer' ? 3 : 2
+        response.completedSteps.push(paymentStep)
+        response.paymentDetails = {
+          paymentAccountType: profile.paymentAccountType,
+          paymentAccountDetails: profile.paymentAccountDetails,
+          paystackSubaccountId: profile.paystackSubaccountId
+        }
+      }
+
+      // Delivery details step (retailers only)
+      if (profile.role === 'retailer') {
+        const hasDeliveryDetails = profile.deliveryMethod && profile.deliveryDetails
+        if (hasDeliveryDetails) {
+          response.completedSteps.push(4)
+          response.deliveryDetails = {
+            deliveryMethod: profile.deliveryMethod,
+            deliveryDetails: profile.deliveryDetails
+          }
+        }
+      }
+
+      // Determine current step
+      const totalSteps = profile.role === 'retailer' ? 5 : 3
+      response.currentStep = Math.min(response.completedSteps.length + 1, totalSteps)
+
+      console.log(`✅ [STEP] Step data fetched for user ${userId}:`, {
+        completedSteps: response.completedSteps,
+        currentStep: response.currentStep,
+        role: profile.role
+      })
+
+      return response
+    } catch (error) {
+      console.error('❌ [STEP] Error fetching step data:', error)
+      throw error
+    }
   }
 }

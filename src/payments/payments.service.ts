@@ -4,7 +4,9 @@ import { PrismaService } from "../prisma/prisma.service"
 import { EscrowService } from "../escrow/escrow.service"
 import { EmailService } from "../email/email.service"
 import { EnhancedCommissionService } from "../commission/enhanced-commission.service"
+import { CommissionQueueService } from "../commission/queue/commission-queue.service"
 import { PickupMtaaniService } from "../pickup-mtaani/pickup-mtaani.service"
+import { PackageTrackingQueueService } from "../pickup-mtaani/package-tracking-queue.service"
 import axios from "axios"
 
 export interface PaystackPaymentData {
@@ -47,6 +49,7 @@ export class PaymentsService {
   private readonly paystackSecretKey: string
   private readonly paystackPublicKey: string
   private readonly paystackBaseUrl = "https://api.paystack.co"
+  private failedPackages: any[] = []
 
   constructor(
     private prisma: PrismaService,
@@ -54,7 +57,9 @@ export class PaymentsService {
     private escrowService: EscrowService,
     private emailService: EmailService,
     private enhancedCommissionService: EnhancedCommissionService,
-    private pickupMtaaniService: PickupMtaaniService
+    private commissionQueueService: CommissionQueueService,
+    private pickupMtaaniService: PickupMtaaniService,
+    private packageTrackingQueueService: PackageTrackingQueueService
   ) {
     this.paystackSecretKey = this.configService.get<string>(
       "PAYSTACK_SECRET_KEY"
@@ -1031,6 +1036,7 @@ export class PaymentsService {
                       businessName: true,
                       role: true,
                       deliveryDetails: true, // ✅ Include delivery details for package creation
+                      pickupMtaaniBusinessDetails: true, // ✅ Include Pickup Mtaani business details
                     },
                   },
                 },
@@ -1120,18 +1126,22 @@ export class PaymentsService {
       await this.prisma.order.update({
         where: { id: order.id },
         data: {
-          status: "confirmed",
+          status: "paid",
+          paidAt: new Date(),
           confirmedAt: new Date(),
         },
       })
-      console.log("✅ [PAYMENT_CALLBACK] Order status updated to confirmed")
+      console.log("✅ [PAYMENT_CALLBACK] Order status updated to paid")
 
       // Create Pick Up Mtaani packages for RETAILER product orders
       console.log(
         "💳 [PAYMENT_CALLBACK] Step 4: Creating Pick Up Mtaani packages for product orders..."
       )
-      await this.createPickUpMtaaniPackages(order)
+      const packageResults = await this.createPickUpMtaaniPackages(order)
       console.log("✅ [PAYMENT_CALLBACK] Pick Up Mtaani packages processed")
+      
+      // Update order status based on package creation results
+      await this.updateOrderStatusBasedOnPackages(order, packageResults)
 
       // Create escrow for VENDOR service payments
       console.log(
@@ -1488,7 +1498,7 @@ export class PaymentsService {
             )
 
           // Create commission transaction record
-          await this.prisma.commissionTransaction.create({
+          const commissionTransaction = await this.prisma.commissionTransaction.create({
             data: {
               businessUserId: retailer.id,
               businessRole: retailer.role as any,
@@ -1517,6 +1527,13 @@ export class PaymentsService {
               commissionRate: commissionData.commissionRate,
             }
           )
+
+          // Queue commission for processing
+          await this.commissionQueueService.addCommissionForProcessing({
+            orderId: order.id,
+            commissionTransactionId: commissionTransaction.id,
+            paystackReference: reference,
+          })
         }
       }
 
@@ -1542,7 +1559,7 @@ export class PaymentsService {
             )
 
           // Create commission transaction record
-          await this.prisma.commissionTransaction.create({
+          const commissionTransaction = await this.prisma.commissionTransaction.create({
             data: {
               businessUserId: vendor.id,
               businessRole: vendor.role as any,
@@ -1571,6 +1588,13 @@ export class PaymentsService {
               commissionRate: commissionData.commissionRate,
             }
           )
+
+          // Queue commission for processing
+          await this.commissionQueueService.addCommissionForProcessing({
+            orderId: order.id,
+            commissionTransactionId: commissionTransaction.id,
+            paystackReference: reference,
+          })
         }
       }
 
@@ -1591,8 +1615,13 @@ export class PaymentsService {
    * This is ONLY for retailers selling physical products that need shipping
    * Vendors use escrow system instead
    */
-  private async createPickUpMtaaniPackages(order: any) {
+  private async createPickUpMtaaniPackages(order: any): Promise<{ success: boolean; failedPackages: any[]; totalPackages: number }> {
+    // Initialize tracking variables
+    this.failedPackages = []
+    let packages: any[] = []
+    
     try {
+      
       console.log(
         "📦 [PICKUP_MTAANI] ==========================================="
       )
@@ -1683,7 +1712,6 @@ export class PaymentsService {
       )
 
       // Create package for each retailer
-      const packages = []
       let packageNumber = 1
 
       for (const [retailerId, group] of retailerGroups) {
@@ -1703,7 +1731,10 @@ export class PaymentsService {
           // Check if retailer has shipping details configured
           const retailerDeliveryDetails = group.retailer.deliveryDetails as any
 
-          if (!retailerDeliveryDetails?.agentId) {
+          // The agentId is nested inside deliveryDetails.deliveryDetails
+          const senderAgentId = retailerDeliveryDetails?.deliveryDetails?.agentId || retailerDeliveryDetails?.agentId
+
+          if (!senderAgentId) {
             console.warn(
               `⚠️ [PICKUP_MTAANI] Retailer ${retailerId} missing sender agent - SKIPPING`
             )
@@ -1715,14 +1746,44 @@ export class PaymentsService {
             continue
           }
 
-          const senderAgentId = Number(retailerDeliveryDetails.agentId)
-          console.log(`📦 [PICKUP_MTAANI] Sender Agent ID: ${senderAgentId}`)
+          const senderAgentIdNumber = Number(senderAgentId)
+          console.log(`📦 [PICKUP_MTAANI] Sender Agent ID: ${senderAgentIdNumber}`)
           console.log(
             `📦 [PICKUP_MTAANI] Sender Location: ${retailerDeliveryDetails.locationName || "Unknown"}`
           )
           console.log(
             `📦 [PICKUP_MTAANI] Sender Agent: ${retailerDeliveryDetails.agentName || "Unknown"}`
           )
+
+          // Debug: Log retailer data for troubleshooting
+          console.log(`🔍 [PICKUP_MTAANI] Retailer ${retailerId} data:`, {
+            id: group.retailer.id,
+            businessName: group.retailer.businessName,
+            fullName: group.retailer.fullName,
+            hasPickupMtaaniBusinessDetails: !!group.retailer.pickupMtaaniBusinessDetails,
+            pickupMtaaniBusinessDetails: group.retailer.pickupMtaaniBusinessDetails
+          })
+
+          // Validate retailer's Pickup Mtaani business ID
+          const businessIdValidation = this.pickupMtaaniService.validateRetailerBusinessId(group.retailer)
+          
+          if (!businessIdValidation.valid) {
+            console.error(`❌ [PICKUP_MTAANI] Retailer ${retailerId} missing Pickup Mtaani business ID`)
+            console.error(`❌ [PICKUP_MTAANI] Error: ${businessIdValidation.error}`)
+            console.error(`❌ [PICKUP_MTAANI] Retailer must complete Pickup Mtaani business setup`)
+            // Add to failed packages list
+            this.failedPackages.push({
+              retailerId,
+              retailerName: group.retailer.businessName || group.retailer.fullName,
+              retailerEmail: group.retailer.email,
+              error: businessIdValidation.error,
+              items: group.items
+            })
+            packageNumber++
+            continue
+          }
+
+          console.log(`📦 [PICKUP_MTAANI] Business ID: ${businessIdValidation.businessId}`)
 
           // Prepare package name with item details
           const itemNames = group.items.map((item) => item.title).join(", ")
@@ -1733,8 +1794,8 @@ export class PaymentsService {
 
           // Prepare package data
           const packageData = {
-            receieverAgentID_id: receiverAgentId,
-            senderAgentID_id: senderAgentId,
+            receiverAgentId: receiverAgentId,
+            senderAgentId: senderAgentIdNumber,
             packageValue: Math.round(group.totalValue), // Round to whole number
             customerName: client.fullName || order.customerEmail.split("@")[0],
             packageName: packageName,
@@ -1748,7 +1809,7 @@ export class PaymentsService {
 
           // Call Pick Up Mtaani API
           const packageResponse =
-            await this.pickupMtaaniService.createPackage(packageData)
+            await this.pickupMtaaniService.createPackage(packageData, businessIdValidation.businessId)
 
           console.log("✅ [PICKUP_MTAANI] Package created successfully!")
           console.log(
@@ -1768,11 +1829,13 @@ export class PaymentsService {
             packageId: packageResponse.data.id,
             receiptNo: packageResponse.data.receipt_no,
             deliveryFee: packageResponse.data.delivery_fee,
-            senderAgentId: senderAgentId,
+            senderAgentId: senderAgentIdNumber,
             receiverAgentId: receiverAgentId,
             packageValue: group.totalValue,
             packageName: packageName,
             status: packageResponse.data.state,
+            paymentStatus: packageResponse.data.payment_status,
+            trackingLink: packageResponse.data.trackingLink,
             createdAt: packageResponse.data.createdAt,
             items: group.items.map((item) => ({
               productId: item.productId,
@@ -1781,6 +1844,24 @@ export class PaymentsService {
               price: Number(item.totalPrice),
             })),
           })
+
+          // Add package tracking job
+          try {
+            await this.packageTrackingQueueService.addPackageTrackingJob({
+              orderId: order.id,
+              packageId: packageResponse.data.id,
+              businessId: businessIdValidation.businessId,
+              retailerId: retailerId,
+              retailerName: group.retailer.businessName || group.retailer.fullName,
+              customerEmail: order.customerEmail,
+              customerName: client?.fullName || 'Customer',
+            }, 5 * 60 * 1000) // Start tracking after 5 minutes
+
+            console.log(`📦 [PACKAGE_TRACKING] Added tracking job for package ${packageResponse.data.id}`)
+          } catch (error) {
+            console.error(`❌ [PACKAGE_TRACKING] Failed to add tracking job for package ${packageResponse.data.id}:`, error)
+            // Don't fail package creation if tracking job fails
+          }
 
           packageNumber++
         } catch (error) {
@@ -1856,9 +1937,39 @@ export class PaymentsService {
         }
       }
 
+      // Handle failed packages
+      if (this.failedPackages.length > 0) {
+        console.log(
+          "📦 [PICKUP_MTAANI] ==========================================="
+        )
+        console.log(`📦 [PICKUP_MTAANI] ${this.failedPackages.length} PACKAGE(S) FAILED`)
+        console.log(
+          "📦 [PICKUP_MTAANI] ==========================================="
+        )
+        
+        // Log failed packages details
+        this.failedPackages.forEach((failedPkg, index) => {
+          console.log(`📦 [PICKUP_MTAANI] Failed Package ${index + 1}:`)
+          console.log(`📦 [PICKUP_MTAANI]   - Retailer: ${failedPkg.retailerName}`)
+          console.log(`📦 [PICKUP_MTAANI]   - Error: ${failedPkg.error}`)
+          console.log(`📦 [PICKUP_MTAANI]   - Items: ${failedPkg.items.length}`)
+        })
+
+        // Send email notifications for failed packages
+        await this.sendFailedPackageNotifications(order, this.failedPackages)
+      }
+
       console.log(
         "📦 [PICKUP_MTAANI] ==========================================="
       )
+
+      // Return results
+      const totalPackages = this.failedPackages.length + packages.length
+      return {
+        success: this.failedPackages.length === 0,
+        failedPackages: this.failedPackages,
+        totalPackages
+      }
     } catch (error) {
       console.error(
         "📦 [PICKUP_MTAANI] ==========================================="
@@ -1874,24 +1985,191 @@ export class PaymentsService {
       )
       // Don't fail payment processing if package creation fails
       // The order is still valid, packages can be created manually
+      return {
+        success: false,
+        failedPackages: this.failedPackages,
+        totalPackages: this.failedPackages.length
+      }
     }
   }
 
   /**
-   * Store package references in order's shippingAddress field
+   * Update order status based on package creation results
+   */
+  private async updateOrderStatusBasedOnPackages(order: any, packageResults: { success: boolean; failedPackages: any[]; totalPackages: number }) {
+    try {
+      let newStatus = 'processing' // Default status
+      
+      if (packageResults.totalPackages === 0) {
+        // No packages to create (services-only order)
+        newStatus = 'processing'
+      } else if (packageResults.success) {
+        // All packages created successfully
+        newStatus = 'processing'
+      } else if (packageResults.failedPackages.length === packageResults.totalPackages) {
+        // All packages failed
+        newStatus = 'shipping_failed'
+      } else {
+        // Some packages failed, some succeeded
+        newStatus = 'partially_shipped'
+      }
+
+      // Update order status
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: { 
+          status: newStatus as any,
+        }
+      })
+
+      // Log package creation results for debugging
+      console.log(`📦 [ORDER_STATUS] Package creation results for order ${order.id}:`, {
+        success: packageResults.success,
+        totalPackages: packageResults.totalPackages,
+        failedPackages: packageResults.failedPackages.length,
+        failedRetailers: packageResults.failedPackages.map(pkg => ({
+          retailerId: pkg.retailerId,
+          retailerName: pkg.retailerName,
+          error: pkg.error
+        }))
+      })
+
+      console.log(`📦 [ORDER_STATUS] Order ${order.id} status updated to: ${newStatus}`)
+      console.log(`📦 [ORDER_STATUS] Package results: ${packageResults.failedPackages.length}/${packageResults.totalPackages} failed`)
+    } catch (error) {
+      console.error('❌ [ORDER_STATUS] Error updating order status based on packages:', error)
+    }
+  }
+
+  /**
+   * Send email notifications for failed package creation
+   */
+  private async sendFailedPackageNotifications(order: any, failedPackages: any[]) {
+    try {
+      console.log("📧 [EMAIL] Sending failed package notifications...")
+      
+      // Get client details
+      const client = await this.prisma.profile.findUnique({
+        where: { id: order.userId },
+        select: { fullName: true, email: true }
+      })
+
+      if (!client) {
+        console.error("❌ [EMAIL] Client not found for failed package notifications")
+        return
+      }
+
+      // Send notifications to retailers with failed packages
+      for (const failedPkg of failedPackages) {
+        try {
+          await this.emailService.sendRetailerPackageCreationFailedEmail(
+            failedPkg.retailerEmail,
+            failedPkg.retailerName,
+            order.id,
+            failedPkg.error
+          )
+          console.log(`✅ [EMAIL] Retailer notification sent to: ${failedPkg.retailerEmail}`)
+        } catch (error) {
+          console.error(`❌ [EMAIL] Failed to send retailer notification to ${failedPkg.retailerEmail}:`, error)
+        }
+      }
+
+      // Send notification to client if any packages failed
+      if (failedPackages.length > 0) {
+        try {
+          await this.emailService.sendClientPartialOrderShippingEmail(
+            client.email,
+            client.fullName || 'Customer',
+            order.id,
+            failedPackages
+          )
+          console.log(`✅ [EMAIL] Client notification sent to: ${client.email}`)
+        } catch (error) {
+          console.error(`❌ [EMAIL] Failed to send client notification to ${client.email}:`, error)
+        }
+      }
+
+      console.log("✅ [EMAIL] Failed package notifications completed")
+    } catch (error) {
+      console.error("❌ [EMAIL] Error sending failed package notifications:", error)
+    }
+  }
+
+  /**
+   * Store package references in order's shippingAddress field and immediately fetch status
    */
   private async storePackageReferences(orderId: string, packages: any[]) {
     try {
       // Get current order
       const order = await this.prisma.order.findUnique({
         where: { id: orderId },
-        select: { shippingAddress: true },
+        select: { shippingAddress: true, retailerId: true },
       })
 
       const shippingAddress = (order?.shippingAddress as any) || {}
 
       // Store packages in shippingAddress JSON field
       shippingAddress.pickupMtaaniPackages = packages
+
+      // Immediately fetch and update package status for the first package
+      if (packages.length > 0) {
+        const firstPackage = packages[0]
+        console.log(`🔄 [PACKAGE_STATUS] Immediately fetching status for package ${firstPackage.packageId}`)
+        
+        try {
+          // Get retailer profile to get business ID
+          const retailerProfile = await this.prisma.profile.findUnique({
+            where: { id: order.retailerId },
+            select: { pickupMtaaniBusinessDetails: true }
+          })
+
+          const businessDetails = retailerProfile?.pickupMtaaniBusinessDetails as any
+          if (businessDetails?.businessId) {
+            const businessId = businessDetails.businessId.toString()
+            
+            // Fetch fresh package data from Pick Up Mtaani
+            const freshPackageData = await this.pickupMtaaniService.getPackageByIdentifier(
+              firstPackage.packageId, 
+              businessId
+            )
+
+            if (freshPackageData) {
+              console.log(`✅ [PACKAGE_STATUS] Fresh package data fetched:`, {
+                status: freshPackageData.state,
+                paymentStatus: freshPackageData.payment_status,
+                trackingLink: freshPackageData.trackingLink
+              })
+
+              // Update the order with fresh package tracking data
+              await this.prisma.order.update({
+                where: { id: orderId },
+                data: {
+                  packageStatus: freshPackageData.state,
+                  packageTrackingId: freshPackageData.trackId,
+                  packageReceiptNo: freshPackageData.receipt_no,
+                  packageTrackingLink: freshPackageData.trackingLink,
+                  packageTrackingHistory: freshPackageData.agent_package_tracks?.descriptions || [],
+                }
+              })
+
+              // Update the package in shippingAddress with fresh data
+              firstPackage.status = freshPackageData.state
+              firstPackage.paymentStatus = freshPackageData.payment_status
+              firstPackage.trackingLink = freshPackageData.trackingLink
+              firstPackage.updatedAt = freshPackageData.createdAt
+
+              console.log(`✅ [PACKAGE_STATUS] Order updated with fresh package data`)
+            } else {
+              console.warn(`⚠️ [PACKAGE_STATUS] Could not fetch fresh data for package ${firstPackage.packageId}`)
+            }
+          } else {
+            console.warn(`⚠️ [PACKAGE_STATUS] Retailer business ID not found for immediate status fetch`)
+          }
+        } catch (statusError) {
+          console.error(`❌ [PACKAGE_STATUS] Failed to fetch immediate status:`, statusError)
+          // Don't fail package creation if status fetch fails
+        }
+      }
 
       await this.prisma.order.update({
         where: { id: orderId },

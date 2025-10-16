@@ -32,6 +32,11 @@ PAYSTACK_SECRET_KEY="your-paystack-secret-key"
 PAYSTACK_PUBLIC_KEY="your-paystack-public-key"
 RESEND_API_KEY="your-resend-api-key"
 
+# Redis Configuration for BullMQ
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=
+
 # Email
 FROM_EMAIL="noreply@urembohub.com"
 FROM_NAME="Urembo Hub"

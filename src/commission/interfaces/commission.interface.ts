@@ -4,7 +4,6 @@ export interface CommissionCalculation {
   commissionRate: number;
   commissionAmount: number;
   netAmount: number;
-  platformFee: number;
 }
 
 export interface CommissionStats {

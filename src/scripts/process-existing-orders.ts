@@ -23,14 +23,28 @@ async function processExistingOrders() {
       paystackService
     )
     const enhancedCommissionService = new EnhancedCommissionService(prisma)
+    // Mock CommissionQueueService for script
+    const commissionQueueService = {
+      addCommissionForProcessing: async () => {},
+      scheduleReconciliation: async () => {},
+      triggerManualReconciliation: async () => {},
+    }
     const pickupMtaaniService = new PickupMtaaniService(configService)
+    const packageTrackingQueueService = {
+      addPackageTrackingJob: async () => {},
+      addMultiplePackageTrackingJobs: async () => {},
+      getQueueStats: async () => ({}),
+      cleanQueue: async () => {},
+    } as any
     const paymentsService = new PaymentsService(
       prisma,
       configService,
       escrowService,
       emailService,
       enhancedCommissionService,
-      pickupMtaaniService
+      commissionQueueService as any,
+      pickupMtaaniService,
+      packageTrackingQueueService
     )
 
     // Get all confirmed service orders that don't have escrows yet

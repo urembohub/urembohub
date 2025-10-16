@@ -3,6 +3,7 @@ export interface RetailerPackageDto {
   orderId: string
   retailerId: string
   retailerName: string
+  businessId?: string
   packageValue: number
   packageName: string
   customerName: string
@@ -23,6 +24,7 @@ export interface RetailerPackageDto {
   status: string // current status from Pick Up Mtaani
   createdAt: string
   updatedAt?: string
+  trackingLink?: string // tracking link from Pick Up Mtaani
 
   // Order details
   orderCreatedAt: string

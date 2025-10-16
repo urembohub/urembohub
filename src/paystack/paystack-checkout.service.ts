@@ -356,9 +356,18 @@ export class PaystackCheckoutService {
         case 'charge.success':
           // Use the PaymentsService to handle the callback and create escrow
           await this.paymentsService.handlePaymentCallback(data.reference);
+          // Mark commission as "processing" - funds collected, awaiting settlement
+          await this.handleChargeSuccess(data);
           break;
         case 'charge.failed':
           await this.handleFailedPayment(data);
+          break;
+        // NEW: Settlement events (for split payment settlements)
+        case 'settlement.completed':
+          await this.handleSettlementCompleted(data);
+          break;
+        case 'settlement.failed':
+          await this.handleSettlementFailed(data);
           break;
         default:
           this.logger.log(`Unhandled webhook event: ${event}`);
@@ -609,8 +618,8 @@ export class PaystackCheckoutService {
       );
     }
 
-    // Use commission data or fallback to platform fee
-    const platformCommission = commissionData ? commissionData.commissionAmount + commissionData.platformFee : totalAmount * 0.05;
+    // Use commission data or fallback to default commission
+    const platformCommission = commissionData ? commissionData.commissionAmount : totalAmount * 0.08;
     const partnerAmount = totalAmount - platformCommission;
 
     console.log('🔍 [CALCULATE_COMMISSION] Partner info:', {
@@ -1018,7 +1027,7 @@ export class PaystackCheckoutService {
       const updatedOrder = await this.prisma.order.update({
         where: { id: order.id },
         data: {
-          status: 'confirmed', // Use 'confirmed' from order_status enum
+          status: 'paid', // Use 'paid' status after payment confirmation
           paymentStatus: 'paid',
           paymentMethod: 'paystack',
           paymentAmount: amount,
@@ -1115,6 +1124,127 @@ export class PaystackCheckoutService {
       
     } catch (error) {
       this.logger.error('Error handling failed payment:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Handle charge success - mark commission as processing
+   */
+  private async handleChargeSuccess(data: any) {
+    try {
+      const reference = data.reference;
+      
+      // Find commissions by transaction ID (which should be the order ID)
+      const commissions = await this.prisma.commissionTransaction.findMany({
+        where: {
+          transactionId: reference,
+          paymentStatus: 'pending',
+        },
+      });
+
+      for (const commission of commissions) {
+        await this.prisma.commissionTransaction.update({
+          where: { id: commission.id },
+          data: {
+            paymentStatus: 'processing',
+            metadata: {
+              ...(commission.metadata as any || {}),
+              chargedAt: new Date().toISOString(),
+              transactionId: data.id,
+              amount: data.amount / 100,
+            },
+          },
+        });
+      }
+
+      this.logger.log(`Marked ${commissions.length} commissions as processing for reference ${reference}`);
+    } catch (error) {
+      this.logger.error('Error handling charge success:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Handle settlement completed - mark commissions as completed
+   */
+  private async handleSettlementCompleted(data: any) {
+    try {
+      this.logger.log(`Settlement completed: ${data.settlement_id}`);
+      
+      // Settlement data contains which subaccounts were paid
+      // Update all commissions related to this settlement
+      const subaccounts = data.subaccounts || [];
+      
+      for (const subaccountSettlement of subaccounts) {
+        const commissions = await this.prisma.commissionTransaction.findMany({
+          where: {
+            paymentStatus: 'processing',
+            businessUser: {
+              paystackSubaccountId: subaccountSettlement.subaccount,
+            },
+          },
+        });
+
+        for (const commission of commissions) {
+          await this.prisma.commissionTransaction.update({
+            where: { id: commission.id },
+            data: {
+              paymentStatus: 'completed',
+              processedAt: new Date(data.settled_at),
+              metadata: {
+                ...(commission.metadata as any || {}),
+                settlementId: data.settlement_id,
+                settledAmount: subaccountSettlement.amount / 100,
+                settledAt: new Date(data.settled_at).toISOString(),
+              },
+            },
+          });
+        }
+
+        this.logger.log(`Updated ${commissions.length} commissions for subaccount ${subaccountSettlement.subaccount}`);
+      }
+    } catch (error) {
+      this.logger.error('Error handling settlement completed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Handle settlement failed - mark commissions as failed
+   */
+  private async handleSettlementFailed(data: any) {
+    try {
+      this.logger.error(`Settlement failed: ${data.settlement_id}`, data.reason);
+      
+      // Find commissions with this settlement reference in metadata
+      const commissions = await this.prisma.commissionTransaction.findMany({
+        where: {
+          paymentStatus: 'processing',
+          metadata: {
+            path: ['settlementId'],
+            equals: data.settlement_id,
+          },
+        },
+      });
+
+      for (const commission of commissions) {
+        await this.prisma.commissionTransaction.update({
+          where: { id: commission.id },
+          data: {
+            paymentStatus: 'failed',
+            metadata: {
+              ...(commission.metadata as any || {}),
+              failureReason: data.reason,
+              failedAt: new Date().toISOString(),
+            },
+          },
+        });
+      }
+
+      this.logger.log(`Marked ${commissions.length} commissions as failed for settlement ${data.settlement_id}`);
+    } catch (error) {
+      this.logger.error('Error handling settlement failed:', error);
       throw error;
     }
   }

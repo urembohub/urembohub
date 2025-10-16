@@ -50,6 +50,9 @@ WORKDIR /app
 # Install OpenSSL for Prisma
 RUN apk add --no-cache openssl
 
+# Note: Environment variables are provided via docker-compose env_file
+# All required env vars should be defined in .env file
+
 # Copy package files
 COPY package*.json ./
 

@@ -165,7 +165,7 @@ export class PaymentVerificationService {
     const orders = await this.prisma.order.findMany({
       where: {
         status: {
-          in: ["confirmed", "processing", "shipped", "completed", "delivered"],
+          in: ["paid", "ready_for_shipping", "processing", "shipped", "completed", "delivered", "in_transit", "cancelled", "returned"],
         },
       },
     })
@@ -184,6 +184,18 @@ export class PaymentVerificationService {
           state: status,
           ...packageData,
         })
+        
+        // Update order status to match Pickup Mtaani state
+        await this.prisma.order.update({
+          where: { id: order.id },
+          data: {
+            status: status, // Direct mirror of Pickup Mtaani state
+          },
+        })
+        
+        this.logger.log(
+          `✅ [WEBHOOK] Updated order ${order.id} status to ${status} from Pickup Mtaani`
+        )
         return
       }
     }
@@ -299,9 +311,26 @@ export class PaymentVerificationService {
         },
       })
 
+      // Get retailer profile to get business ID
+      const retailerProfile = await this.prisma.profile.findUnique({
+        where: { id: verification.retailerId },
+        select: {
+          pickupMtaaniBusinessDetails: true,
+        }
+      })
+
+      // Validate business ID
+      const businessIdValidation = this.pickupMtaaniService.validateRetailerBusinessId(retailerProfile)
+      
+      if (!businessIdValidation.valid) {
+        this.logger.warn(`⚠️ [VERIFY] Retailer ${verification.retailerId} has not completed Pickup Mtaani business setup`)
+        return "failed"
+      }
+
       // Get package status from Pick Up Mtaani
       const packageData = await this.pickupMtaaniService.getPackageByIdentifier(
-        verification.packageId.toString()
+        verification.packageId.toString(),
+        businessIdValidation.businessId
       )
 
       if (!packageData) {
@@ -442,8 +471,16 @@ export class PaymentVerificationService {
         },
       })
 
+      // Update order status to ready_for_shipping when package payment is verified
+      await this.prisma.order.update({
+        where: { id: orderId },
+        data: {
+          status: 'ready_for_shipping',
+        },
+      })
+
       this.logger.log(
-        `✅ [UPDATE] Updated package ${packageId} in order ${orderId}`
+        `✅ [UPDATE] Updated package ${packageId} in order ${orderId} and set status to ready_for_shipping`
       )
     } catch (error) {
       this.logger.error(

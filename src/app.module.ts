@@ -22,6 +22,7 @@ import { CmsModule } from "./cms/cms.module"
 import { ProductCategoriesModule } from "./product-categories/product-categories.module"
 import { ServiceCategoriesModule } from "./service-categories/service-categories.module"
 import { EmailModule } from "./email/email.module"
+import { EmailQueueModule } from "./email/email-queue.module"
 import { EscrowModule } from "./escrow/escrow.module"
 import { WishlistModule } from "./wishlist/wishlist.module"
 import { PasswordResetModule } from "./auth/password-reset.module"
@@ -32,6 +33,10 @@ import { PaystackModule } from "./paystack/paystack.module"
 import { AgoraModule } from "./agora/agora.module"
 import { SupabaseModule } from "./supabase/supabase.module"
 import { PickupMtaaniModule } from "./pickup-mtaani/pickup-mtaani.module"
+import { PackageTrackingQueueModule } from "./pickup-mtaani/package-tracking-queue.module"
+import { QueueModule } from "./queue/queue.module"
+import { CommissionQueueModule } from "./commission/queue/commission-queue.module"
+import { QueueBullBoardModule } from "./queue/bull-board.module"
 
 @Module({
   imports: [
@@ -68,6 +73,11 @@ import { PickupMtaaniModule } from "./pickup-mtaani/pickup-mtaani.module"
     AgoraModule,
     SupabaseModule,
     PickupMtaaniModule,
+    PackageTrackingQueueModule,
+    QueueModule,
+    CommissionQueueModule,
+    QueueBullBoardModule,
+    EmailQueueModule,
   ],
   controllers: [AppController],
   providers: [AppService],
