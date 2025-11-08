@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
+import { PaymentsService } from '../payments/payments.service';
 // Removed order_status and order_status_enhanced imports as we now use string status
 
 export interface CreateOrderDto {
@@ -46,6 +47,7 @@ export class OrdersService {
   constructor(
     private prisma: PrismaService,
     private emailService: EmailService,
+    private paymentsService: PaymentsService,
   ) {}
 
   async createOrder(userId: string | null, createOrderDto: CreateOrderDto) {
@@ -138,8 +140,161 @@ export class OrdersService {
     return this.getOrderById(order.id);
   }
 
-  async getAllOrders(status?: string) {
-    const where = status ? { status } : {};
+  async createDoorstepPaymentDueOrder(userId: string | null, createOrderDto: CreateOrderDto) {
+    const { cartItems, ...orderData } = createOrderDto;
+
+    // Extract retailerId and vendorId from cart items
+    const productItems = cartItems.filter(item => item.type === 'product');
+    const serviceItems = cartItems.filter(item => item.type === 'service');
+    
+    // Get retailerId from first product item (assuming single retailer per order)
+    const retailerId = productItems.length > 0 ? 
+      await this.getRetailerIdFromProduct(productItems[0].id) : null;
+    
+    // Get vendorId from first service item (assuming single vendor per order)
+    const vendorId = serviceItems.length > 0 ? serviceItems[0].vendorId : null;
+
+    // Create the order with paymentDueAtDoor flag
+    const order = await this.prisma.order.create({
+      data: {
+        ...orderData,
+        userId,
+        retailerId,
+        vendorId,
+        status: 'pending',
+        paymentDueAtDoor: true,
+        paymentStatus: 'pending',
+      } as any,
+    });
+
+    // Create order items for products
+    if (productItems.length > 0) {
+      const orderItems = productItems.map(item => ({
+        orderId: order.id,
+        productId: item.id,
+        quantity: item.quantity || 1,
+        unitPrice: item.price,
+        totalPrice: item.price * (item.quantity || 1),
+        currency: orderData.currency,
+        title: item.name,
+        type: 'product',
+      }));
+
+      await this.prisma.orderItem.createMany({
+        data: orderItems,
+      });
+    }
+
+    // Create service appointments for services
+    if (serviceItems.length > 0) {
+      const serviceAppointments = serviceItems.map(item => ({
+        orderId: order.id,
+        serviceId: item.id,
+        vendorId: item.vendorId!,
+        staffId: item.staffId,
+        appointmentDate: new Date(item.appointmentDate!),
+        durationMinutes: item.durationMinutes || 60,
+        servicePrice: item.price,
+        currency: orderData.currency,
+        status: 'PENDING' as const,
+        notes: orderData.notes,
+      }));
+
+      await this.prisma.serviceAppointment.createMany({
+        data: serviceAppointments,
+      });
+    }
+
+    // Fetch order with full relations for package creation
+    const orderWithRelations = await this.prisma.order.findUnique({
+      where: { id: order.id },
+      include: {
+        orderItems: {
+          include: {
+            product: {
+              include: {
+                retailer: {
+                  select: {
+                    id: true,
+                    email: true,
+                    fullName: true,
+                    businessName: true,
+                    deliveryDetails: true,
+                    pickupMtaaniBusinessDetails: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        user: {
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            phone: true,
+            deliveryDetails: true,
+          },
+        },
+      },
+    });
+
+    // Immediately create Pick Up Mtaani packages
+    if (orderWithRelations && productItems.length > 0) {
+      console.log('📦 [DOORSTEP_PAYMENT] Creating Pick Up Mtaani packages immediately...');
+      try {
+        const packageResults = await this.paymentsService.createPickUpMtaaniPackages(orderWithRelations);
+        console.log(`📦 [DOORSTEP_PAYMENT] Package creation result:`, packageResults);
+        
+        // Update order status based on package creation results
+        if (packageResults.success && packageResults.totalPackages > 0) {
+          await this.prisma.order.update({
+            where: { id: order.id },
+            data: { 
+              status: packageResults.failedPackages.length === 0 ? 'processing' : 'pending',
+              packageStatus: packageResults.failedPackages.length === 0 ? 'created' : 'partial',
+            },
+          });
+          
+          // Give a small delay to ensure packages are fully saved to database
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      } catch (error) {
+        console.error('❌ [DOORSTEP_PAYMENT] Failed to create packages:', error);
+        // Don't fail order creation if package creation fails
+      }
+    }
+
+    // Send order confirmation email to customer
+    try {
+      const orderDataForEmail = {
+        orderId: order.id,
+        totalAmount: orderData.totalAmount,
+        currency: orderData.currency,
+        items: cartItems.map(item => item.name)
+      };
+      await this.emailService.sendNewOrderEmail(
+        orderData.customerEmail,
+        'Customer',
+        order.id,
+        orderDataForEmail
+      );
+      console.log('✅ [DOORSTEP_PAYMENT] Customer order confirmation email sent successfully!');
+    } catch (error) {
+      console.error('❌ [DOORSTEP_PAYMENT] Failed to send customer order confirmation email:', error);
+      // Don't fail order creation if email fails
+    }
+
+    // Send notifications to vendors, retailers, and manufacturers
+    await this.sendOrderNotificationsToPartners(order.id, cartItems, orderData);
+
+    return this.getOrderById(order.id);
+  }
+
+  async getAllOrders(status?: string, paymentDueAtDoor?: boolean) {
+    const where: any = {};
+    if (status) where.status = status;
+    if (paymentDueAtDoor !== undefined) (where as any).paymentDueAtDoor = paymentDueAtDoor;
     
     const orders = await this.prisma.order.findMany({
       where,
@@ -363,9 +518,47 @@ export class OrdersService {
     return updatedOrder;
   }
 
-  async getUserOrders(userId: string) {
+  async getUserOrders(userId: string, paymentDueAtDoor?: boolean) {
+    console.log('📋 [GET_USER_ORDERS] Fetching orders for user:', userId);
+    
+    // Also match orders by customerEmail if userId is available
+    // This handles cases where orders might have been created before user login
+    const where: any = {};
+    
+    // If we have userId, also try to get user's email to match orders created as guest
+    let userEmail: string | null = null;
+    if (userId) {
+      try {
+        const userProfile = await this.prisma.profile.findUnique({
+          where: { id: userId },
+          select: { email: true }
+        });
+        userEmail = userProfile?.email || null;
+        console.log('📋 [GET_USER_ORDERS] User email:', userEmail);
+      } catch (error) {
+        console.error('Error fetching user email for order matching:', error);
+      }
+    }
+    
+    // Build where clause - match by userId OR by customerEmail (if user exists)
+    if (userEmail) {
+      where.OR = [
+        { userId },
+        { customerEmail: userEmail }
+      ];
+    } else if (userId) {
+      where.userId = userId;
+    }
+    
+    if (paymentDueAtDoor !== undefined) {
+      (where as any).paymentDueAtDoor = paymentDueAtDoor;
+      console.log('📋 [GET_USER_ORDERS] Filtering by paymentDueAtDoor:', paymentDueAtDoor);
+    }
+    
+    console.log('📋 [GET_USER_ORDERS] Where clause:', JSON.stringify(where, null, 2));
+    
     const orders = await this.prisma.order.findMany({
-      where: { userId },
+      where,
       include: {
         orderItems: {
           include: {
@@ -403,6 +596,14 @@ export class OrdersService {
       orderBy: { createdAt: 'desc' },
     });
 
+    console.log('📋 [GET_USER_ORDERS] Found orders:', orders.length);
+    if (orders.length > 0) {
+      console.log('📋 [GET_USER_ORDERS] First order ID:', orders[0].id);
+      console.log('📋 [GET_USER_ORDERS] First order createdAt:', orders[0].createdAt);
+      console.log('📋 [GET_USER_ORDERS] First order userId:', orders[0].userId);
+      console.log('📋 [GET_USER_ORDERS] First order customerEmail:', orders[0].customerEmail);
+    }
+
     // Transform orders to include package tracking data from shippingAddress
     const transformedOrders = orders.map(order => {
       const shippingAddress = order.shippingAddress as any;
@@ -411,7 +612,8 @@ export class OrdersService {
       // Get package data for this user's orders
       const userPackages = packages.filter((pkg: any) => 
         // Filter packages that belong to this order
-        pkg.orderId === order.id
+        // Support both: packages with orderId and legacy packages without orderId (if only one package exists)
+        pkg.orderId === order.id || (!pkg.orderId && packages.length === 1)
       );
 
       return {
@@ -629,8 +831,17 @@ export class OrdersService {
       where: {
         order: {
           retailerId: retailerId,
-          paymentReference: { not: null },
-          paymentStatus: 'paid'
+          OR: [
+            // Regular paid orders
+            {
+              paymentReference: { not: null },
+              paymentStatus: 'paid'
+            },
+            // Customer pays at door orders (created immediately, payment pending)
+            {
+              paymentDueAtDoor: true
+            } as any
+          ]
         }
       },
       include: {
@@ -646,6 +857,7 @@ export class OrdersService {
             paymentStatus: true,
             paymentReference: true,
             paystackReference: true,
+            paymentDueAtDoor: true,
             user: {
               select: {
                 id: true,
@@ -653,7 +865,7 @@ export class OrdersService {
                 email: true
               }
             }
-          }
+          } as any
         },
         product: {
           select: {

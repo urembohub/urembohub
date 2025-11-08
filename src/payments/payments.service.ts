@@ -1633,7 +1633,7 @@ export class PaymentsService {
    * This is ONLY for retailers selling physical products that need shipping
    * Vendors use escrow system instead
    */
-  private async createPickUpMtaaniPackages(order: any): Promise<{ success: boolean; failedPackages: any[]; totalPackages: number }> {
+  async createPickUpMtaaniPackages(order: any): Promise<{ success: boolean; failedPackages: any[]; totalPackages: number }> {
     // Initialize tracking variables
     this.failedPackages = []
     let packages: any[] = []
@@ -1747,10 +1747,20 @@ export class PaymentsService {
       }
 
       const clientDeliveryDetails = client.deliveryDetails as any
-      const receiverAgentId = Number(clientDeliveryDetails.agentId)
+      const deliveryMode = clientDeliveryDetails.deliveryMode || "agent"
+      
+      // Extract delivery details based on mode
+      const receiverAgentId = deliveryMode === "agent" ? Number(clientDeliveryDetails.agentId) : undefined
+      const doorstepDestinationId = deliveryMode === "door" ? Number(clientDeliveryDetails.doorstepDestinationId) : undefined
+      const lat = deliveryMode === "door" ? clientDeliveryDetails.lat : undefined
+      const lng = deliveryMode === "door" ? clientDeliveryDetails.lng : undefined
+      const addressDescription = deliveryMode === "door" ? clientDeliveryDetails.locationDescription : undefined
+      const paymentOption = deliveryMode === "door" ? (clientDeliveryDetails.paymentOption || "vendor") : "vendor"
+      const paymentNumber = deliveryMode === "door" && paymentOption === "customer" ? clientDeliveryDetails.paymentNumber : undefined
 
-      if (!receiverAgentId) {
-        console.error("❌ [PICKUP_MTAANI] Client missing receiver agent ID")
+      // Validate required fields based on delivery mode
+      if (deliveryMode === "agent" && !receiverAgentId) {
+        console.error("❌ [PICKUP_MTAANI] Client missing receiver agent ID for agent delivery")
         return {
           success: false,
           failedPackages: [],
@@ -1758,14 +1768,52 @@ export class PaymentsService {
         }
       }
 
+      if (deliveryMode === "door") {
+        if (!doorstepDestinationId) {
+          console.error("❌ [PICKUP_MTAANI] Client missing doorstep destination ID for door delivery")
+          return {
+            success: false,
+            failedPackages: [],
+            totalPackages: 0
+          }
+        }
+        if (!lat || !lng) {
+          console.error("❌ [PICKUP_MTAANI] Client missing coordinates for door delivery")
+          return {
+            success: false,
+            failedPackages: [],
+            totalPackages: 0
+          }
+        }
+        if (paymentOption === "customer" && !paymentNumber) {
+          console.error("❌ [PICKUP_MTAANI] Client missing payment number for customer pays at door")
+          return {
+            success: false,
+            failedPackages: [],
+            totalPackages: 0
+          }
+        }
+      }
+
       console.log(`📦 [PICKUP_MTAANI] Client: ${client.fullName || "Unknown"}`)
-      console.log(`📦 [PICKUP_MTAANI] Receiver Agent ID: ${receiverAgentId}`)
-      console.log(
-        `📦 [PICKUP_MTAANI] Receiver Location: ${clientDeliveryDetails.locationName || "Unknown"}`
-      )
-      console.log(
-        `📦 [PICKUP_MTAANI] Receiver Agent: ${clientDeliveryDetails.agentName || "Unknown"}`
-      )
+      console.log(`📦 [PICKUP_MTAANI] Delivery Mode: ${deliveryMode.toUpperCase()}`)
+      if (deliveryMode === "agent") {
+        console.log(`📦 [PICKUP_MTAANI] Receiver Agent ID: ${receiverAgentId}`)
+        console.log(
+          `📦 [PICKUP_MTAANI] Receiver Location: ${clientDeliveryDetails.locationName || "Unknown"}`
+        )
+        console.log(
+          `📦 [PICKUP_MTAANI] Receiver Agent: ${clientDeliveryDetails.agentName || "Unknown"}`
+        )
+      } else {
+        console.log(`📦 [PICKUP_MTAANI] Doorstep Destination ID: ${doorstepDestinationId}`)
+        console.log(`📦 [PICKUP_MTAANI] Address: ${addressDescription || "Unknown"}`)
+        console.log(`📦 [PICKUP_MTAANI] Coordinates: ${lat}, ${lng}`)
+        console.log(`📦 [PICKUP_MTAANI] Payment Option: ${paymentOption}`)
+        if (paymentNumber) {
+          console.log(`📦 [PICKUP_MTAANI] Payment Number: ${paymentNumber}`)
+        }
+      }
 
       // Create package for each retailer
       let packageNumber = 1
@@ -1848,17 +1896,40 @@ export class PaymentsService {
               ? `Order ${order.id.slice(0, 8)} - ${itemNames.slice(0, 30)}`
               : `Order ${order.id.slice(0, 8)} - ${group.items.length} items`
 
-          // Prepare package data
-          const packageData = {
-            receiverAgentId: receiverAgentId,
+          // Calculate on_delivery_balance
+          // For vendor prepaid: 0 (already paid via Paystack)
+          // For customer pays at door: package value (delivery fee will be added by Pick Up Mtaani)
+          const onDeliveryBalance = paymentOption === "customer" 
+            ? Math.round(group.totalValue) 
+            : 0
+
+          // Prepare package data - base fields
+          const packageData: any = {
             senderAgentId: senderAgentIdNumber,
             packageValue: Math.round(group.totalValue), // Round to whole number
             customerName: client.fullName || order.customerEmail.split("@")[0],
             packageName: packageName,
             customerPhoneNumber:
               order.customerPhone || client.phone || "0700000000",
-            paymentOption: "vendor" as const, // Payment already completed via Paystack
-            on_delivery_balance: 0, // No payment on delivery
+            // IMPORTANT: Pick Up Mtaani API requires paymentOption to be "vendor" for doorstep packages
+            // even when customer pays at door. The actual payment intent is tracked via on_delivery_balance
+            paymentOption: deliveryMode === "door" ? "vendor" : paymentOption,
+            on_delivery_balance: onDeliveryBalance,
+          }
+
+          // Add mode-specific fields
+          if (deliveryMode === "agent") {
+            packageData.receiverAgentId = receiverAgentId
+          } else {
+            // Door delivery fields (matching API field names)
+            packageData.doorstepDestinationId = doorstepDestinationId
+            packageData.lat = lat
+            packageData.lng = lng
+            packageData.locationDescription = addressDescription // API expects locationDescription
+            // For customer pays at door, include payment_number for STK push
+            if (paymentOption === "customer" && paymentNumber) {
+              packageData.payment_number = paymentNumber // API expects payment_number (snake_case)
+            }
           }
 
           console.log("📦 [PICKUP_MTAANI] Calling Pick Up Mtaani API...")
@@ -1879,6 +1950,7 @@ export class PaymentsService {
           )
 
           packages.push({
+            orderId: order.id, // Include orderId so packages can be matched to orders
             retailerId: retailerId,
             retailerName:
               group.retailer.businessName || group.retailer.fullName,
@@ -1887,6 +1959,11 @@ export class PaymentsService {
             deliveryFee: packageResponse.data.delivery_fee,
             senderAgentId: senderAgentIdNumber,
             receiverAgentId: receiverAgentId,
+            // Door delivery fields
+            doorstepDestinationId: deliveryMode === "door" ? doorstepDestinationId : undefined,
+            lat: deliveryMode === "door" ? lat : undefined,
+            lng: deliveryMode === "door" ? lng : undefined,
+            locationDescription: deliveryMode === "door" ? addressDescription : undefined,
             packageValue: group.totalValue,
             packageName: packageName,
             status: packageResponse.data.state,
@@ -1899,6 +1976,8 @@ export class PaymentsService {
               quantity: item.quantity,
               price: Number(item.totalPrice),
             })),
+            // Track actual payment intent (even though API uses "vendor" for doorstep)
+            actualPaymentOption: paymentOption,
           })
 
           // Add package tracking job
@@ -1911,9 +1990,11 @@ export class PaymentsService {
               retailerName: group.retailer.businessName || group.retailer.fullName,
               customerEmail: order.customerEmail,
               customerName: client?.fullName || 'Customer',
+              isDoorDelivery: deliveryMode === "door",
+              doorstepDestinationId: deliveryMode === "door" ? doorstepDestinationId : undefined,
             }, 30 * 1000) // Start tracking after 30 seconds for demo
 
-            console.log(`📦 [PACKAGE_TRACKING] Added tracking job for package ${packageResponse.data.id}`)
+            console.log(`📦 [PACKAGE_TRACKING] Added tracking job for package ${packageResponse.data.id} ${deliveryMode === "door" ? "(🚪 Door Delivery)" : "(🚚 Agent Pick-up)"}`)
           } catch (error) {
             console.error(`❌ [PACKAGE_TRACKING] Failed to add tracking job for package ${packageResponse.data.id}:`, error)
             // Don't fail package creation if tracking job fails
@@ -2227,9 +2308,12 @@ export class PaymentsService {
             const businessId = businessDetails.businessId.toString()
             
             // Fetch fresh package data from Pick Up Mtaani
+            // Check if this is a doorstep package
+            const isDoorDelivery = !!firstPackage.doorstepDestinationId
             const freshPackageResponse = await this.pickupMtaaniService.getPackageStatus(
               firstPackage.packageId, 
-              businessId
+              businessId,
+              isDoorDelivery
             )
             const freshPackageData = freshPackageResponse?.data
 
@@ -2247,6 +2331,12 @@ export class PaymentsService {
               firstPackage.updatedAt = freshPackageData.createdAt
 
               // Update the order with fresh package tracking data
+              // Ensure all packages have orderId
+              const packagesWithOrderId = packages.map(pkg => ({
+                ...pkg,
+                orderId: orderId
+              }));
+              
               await this.prisma.order.update({
                 where: { id: orderId },
                 data: {
@@ -2254,13 +2344,21 @@ export class PaymentsService {
                   packageTrackingId: freshPackageData.trackId,
                   packageReceiptNo: freshPackageData.receipt_no,
                   packageTrackingLink: freshPackageData.trackingLink,
-                  packageTrackingHistory: freshPackageData.agent_package_tracks?.descriptions || [],
+                  packageTrackingHistory: 
+                    freshPackageData.door_step_package_tracks?.descriptions || 
+                    freshPackageData.agent_package_tracks?.descriptions || 
+                    [],
                   shippingAddress: {
                     ...shippingAddress,
-                    pickupMtaaniPackages: packages,
+                    pickupMtaaniPackages: packagesWithOrderId,
                   },
                 }
               })
+              
+              // Update packages array for final save
+              packages.forEach(pkg => {
+                pkg.orderId = orderId;
+              });
 
               console.log(`✅ [PACKAGE_STATUS] Order updated with fresh package data`)
             } else {
@@ -2275,9 +2373,20 @@ export class PaymentsService {
         }
       }
 
+      // Ensure all packages have orderId before saving
+      const packagesWithOrderId = shippingAddress.pickupMtaaniPackages?.map((pkg: any) => ({
+        ...pkg,
+        orderId: orderId
+      })) || [];
+      
       await this.prisma.order.update({
         where: { id: orderId },
-        data: { shippingAddress },
+        data: { 
+          shippingAddress: {
+            ...shippingAddress,
+            pickupMtaaniPackages: packagesWithOrderId,
+          }
+        },
       })
 
       console.log(

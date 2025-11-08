@@ -1,11 +1,10 @@
-import { Controller, Get, Post, UseGuards, Request, Logger, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, UseGuards, Request, Logger, Body, Param, Query } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { PickupMtaaniService } from './pickup-mtaani.service';
 import { CreateBusinessDto } from './dto/create-business.dto';
 
 @Controller('pickup-mtaani')
-@UseGuards(JwtAuthGuard)
 export class PickupMtaaniController {
   private readonly logger = new Logger(PickupMtaaniController.name);
 
@@ -34,6 +33,7 @@ export class PickupMtaaniController {
   /**
    * Create business on Pick Up Mtaani
    */
+  @UseGuards(JwtAuthGuard)
   @Post('business')
   async createBusiness(@Request() req, @Body() createBusinessDto: CreateBusinessDto) {
     try {
@@ -97,6 +97,7 @@ export class PickupMtaaniController {
   /**
    * Get business categories
    */
+  @UseGuards(JwtAuthGuard)
   @Get('business-categories')
   async getBusinessCategories() {
     try {
@@ -126,8 +127,53 @@ export class PickupMtaaniController {
   }
 
   /**
+   * Get delivery charge for doorstep package
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('delivery-charge/doorstep')
+  async getDoorstepDeliveryCharge(
+    @Query('senderAgentId') senderAgentIdParam: string,
+    @Query('senderAgentID') senderAgentIDParam: string,
+    @Query('doorstepDestinationId') doorstepDestinationIdParam: string,
+    @Query('doorstepDestinationID') doorstepDestinationIDParam: string,
+  ) {
+    try {
+      const senderAgentId = Number(senderAgentIdParam || senderAgentIDParam)
+      const doorstepDestinationId = Number(doorstepDestinationIdParam || doorstepDestinationIDParam)
+
+      if (!senderAgentId || !doorstepDestinationId) {
+        return {
+          success: false,
+          error: 'senderAgentId and doorstepDestinationId are required',
+        }
+      }
+
+      this.logger.log(
+        `💰 [DELIVERY_CHARGE] Fetching doorstep delivery charge: ${senderAgentId} → ${doorstepDestinationId}`
+      )
+
+      const charge = await this.pickupMtaaniService.getDoorstepDeliveryCharge(
+        senderAgentId,
+        doorstepDestinationId
+      )
+
+      return {
+        success: true,
+        data: { price: charge },
+      }
+    } catch (error) {
+      this.logger.error('❌ [DELIVERY_CHARGE] Error fetching doorstep delivery charge:', error)
+      return {
+        success: false,
+        error: 'Failed to fetch delivery charge',
+      }
+    }
+  }
+
+  /**
    * Initiate package payment (STK push)
    */
+  @UseGuards(JwtAuthGuard)
   @Post('packages/:packageId/pay')
   async initiatePackagePayment(
     @Request() req,
@@ -217,6 +263,7 @@ export class PickupMtaaniController {
   /**
    * Get packages for the logged-in retailer
    */
+  @UseGuards(JwtAuthGuard)
   @Get('packages')
   async getRetailerPackages(@Request() req) {
     try {
@@ -303,10 +350,39 @@ export class PickupMtaaniController {
         const shippingAddress = order.shippingAddress as any;
         const orderPackages = shippingAddress?.pickupMtaaniPackages || [];
 
-        // Filter packages for this retailer
+        this.logger.log(`📦 [RETAILER_PACKAGES] Order ${order.id} has ${orderPackages.length} packages`);
+        if (orderPackages.length > 0) {
+          this.logger.log(`📦 [RETAILER_PACKAGES] Package retailer IDs:`, orderPackages.map((pkg: any) => ({
+            packageId: pkg.packageId,
+            retailerId: pkg.retailerId,
+            orderId: pkg.orderId,
+            isDoorDelivery: !!pkg.doorstepDestinationId
+          })));
+        }
+
+        // Filter packages for this retailer - match by retailerId OR if no retailerId but order belongs to this retailer
         const retailerPackages = orderPackages.filter(
-          (pkg: any) => pkg.retailerId === userId
+          (pkg: any) => {
+            // If package has retailerId, match by it
+            if (pkg.retailerId) {
+              return pkg.retailerId === userId;
+            }
+            // If no retailerId, check if this order belongs to this retailer
+            // This handles legacy packages or packages without retailerId
+            const orderItems = order.orderItems || [];
+            return orderItems.some((item: any) => item.product?.retailerId === userId);
+          }
         );
+        
+        this.logger.log(`📦 [RETAILER_PACKAGES] Found ${retailerPackages.length} packages for retailer ${userId} in order ${order.id}`);
+        if (retailerPackages.length > 0) {
+          this.logger.log(`📦 [RETAILER_PACKAGES] Package details:`, retailerPackages.map((pkg: any) => ({
+            packageId: pkg.packageId,
+            receiptNo: pkg.receiptNo,
+            status: pkg.status,
+            isDoorDelivery: !!pkg.doorstepDestinationId
+          })));
+        }
 
         for (const pkg of retailerPackages) {
           packages.push({
@@ -316,12 +392,17 @@ export class PickupMtaaniController {
             paymentStatus: pkg.paymentStatus,
             trackingLink: pkg.trackingLink,
             deliveryFee: pkg.deliveryFee,
-          packageValue: pkg.packageValue,
-          packageName: pkg.packageName,
+            packageValue: pkg.packageValue,
+            packageName: pkg.packageName,
             customerName: pkg.customerName || order.customerEmail.split('@')[0],
             customerPhone: pkg.customerPhone || order.customerPhone,
-          senderAgentId: pkg.senderAgentId,
-          receiverAgentId: pkg.receiverAgentId,
+            senderAgentId: pkg.senderAgentId,
+            receiverAgentId: pkg.receiverAgentId,
+            // Door delivery fields
+            doorstepDestinationId: pkg.doorstepDestinationId,
+            lat: pkg.lat,
+            lng: pkg.lng,
+            locationDescription: pkg.locationDescription,
             createdAt: pkg.createdAt || order.createdAt,
             updatedAt: pkg.updatedAt,
             items: pkg.items || order.orderItems.map(item => ({
@@ -331,9 +412,9 @@ export class PickupMtaaniController {
               price: Number(item.totalPrice),
             })),
             orderId: order.id,
-          orderStatus: order.status,
-          businessId: businessDetails.businessId, // Add business ID to package data
-          hasBusinessId: true, // Add flag to indicate business ID is available
+            orderStatus: order.status,
+            businessId: businessDetails.businessId, // Add business ID to package data
+            hasBusinessId: true, // Add flag to indicate business ID is available
           });
         }
       }
@@ -363,6 +444,7 @@ export class PickupMtaaniController {
   /**
    * Get package details by ID
    */
+  @UseGuards(JwtAuthGuard)
   @Get('packages/:packageId')
   async getPackageDetails(@Request() req, packageId: string) {
     try {
@@ -415,6 +497,7 @@ export class PickupMtaaniController {
   /**
    * Refresh package status from Pick Up Mtaani
    */
+  @UseGuards(JwtAuthGuard)
   @Get('packages/:packageId/refresh')
   async refreshPackageStatus(@Request() req, packageId: string) {
     try {
@@ -499,7 +582,10 @@ export class PickupMtaaniController {
               packageTrackingId: packageData.trackId,
               packageReceiptNo: packageData.receipt_no,
               packageTrackingLink: this.normalizeTrackingLink(packageData.trackingLink),
-              packageTrackingHistory: packageData.agent_package_tracks?.descriptions || [],
+              packageTrackingHistory: 
+                packageData.door_step_package_tracks?.descriptions || 
+                packageData.agent_package_tracks?.descriptions || 
+                [],
             },
           });
 
@@ -518,6 +604,142 @@ export class PickupMtaaniController {
       return {
         success: false,
         error: 'Failed to refresh package status',
+      };
+    }
+  }
+
+  /**
+   * Webhook endpoint for Pick Up Mtaani payment confirmation
+   * This endpoint is called when payment is confirmed for a package
+   * It should not require authentication as it's called by Pick Up Mtaani
+   */
+  @Post('webhook/payment-confirmation')
+  async handlePaymentConfirmation(@Body() webhookData: {
+    packageId?: number;
+    receiptNo?: string;
+    orderId?: string;
+    paymentStatus?: string;
+    paymentConfirmed?: boolean;
+    amount?: number;
+    [key: string]: any;
+  }) {
+    try {
+      this.logger.log('💳 [PAYMENT_WEBHOOK] Received payment confirmation webhook:', JSON.stringify(webhookData, null, 2));
+
+      // Extract package identifier from webhook data
+      const packageId = webhookData.packageId;
+      const receiptNo = webhookData.receiptNo;
+      const orderId = webhookData.orderId;
+
+      if (!packageId && !receiptNo && !orderId) {
+        this.logger.error('❌ [PAYMENT_WEBHOOK] Missing package identifier in webhook data');
+        return {
+          success: false,
+          error: 'Missing package identifier (packageId, receiptNo, or orderId)',
+        };
+      }
+
+      // Find orders with paymentDueAtDoor: true
+      // First, get all orders with paymentDueAtDoor: true
+      const allPaymentDueOrders = await this.prisma.order.findMany({
+        where: {
+          paymentDueAtDoor: true,
+        } as any,
+        include: {
+          orderItems: true,
+        },
+      });
+
+      // Then filter by matching package ID or receipt number in shippingAddress
+      const orders = allPaymentDueOrders.filter(order => {
+        // If orderId is provided and matches, include it
+        if (orderId && order.id === orderId) {
+          return true;
+        }
+
+        // Otherwise, check shippingAddress for matching package
+        const shippingAddress = order.shippingAddress as any;
+        const packages = shippingAddress?.pickupMtaaniPackages || [];
+
+        return packages.some((pkg: any) => {
+          if (packageId && pkg.packageId === packageId) return true;
+          if (receiptNo && pkg.receiptNo === receiptNo) return true;
+          return false;
+        });
+      });
+
+      this.logger.log(`💳 [PAYMENT_WEBHOOK] Found ${orders.length} orders matching criteria`);
+
+      if (orders.length === 0) {
+        // Also try to find by package ID in shippingAddress
+        const allOrdersWithPaymentDue = await this.prisma.order.findMany({
+          where: {
+            paymentDueAtDoor: true,
+          } as any,
+          include: {
+            orderItems: true,
+          },
+        });
+
+        // Search through shippingAddress for matching packages
+        for (const order of allOrdersWithPaymentDue) {
+          const shippingAddress = order.shippingAddress as any;
+          const packages = shippingAddress?.pickupMtaaniPackages || [];
+
+          const matchingPackage = packages.find((pkg: any) => {
+            if (packageId && pkg.packageId === packageId) return true;
+            if (receiptNo && pkg.receiptNo === receiptNo) return true;
+            return false;
+          });
+
+          if (matchingPackage) {
+            orders.push(order);
+            break;
+          }
+        }
+      }
+
+      if (orders.length === 0) {
+        this.logger.warn('⚠️ [PAYMENT_WEBHOOK] No orders found with paymentDueAtDoor matching package criteria');
+        return {
+          success: false,
+          error: 'No matching orders found',
+        };
+      }
+
+      // Update each matching order
+      const updatedOrders = [];
+      for (const order of orders) {
+        this.logger.log(`💳 [PAYMENT_WEBHOOK] Updating order ${order.id} - marking payment as confirmed`);
+
+        const updatedOrder = await this.prisma.order.update({
+          where: { id: order.id },
+          data: {
+            paymentDueAtDoor: false,
+            paymentStatus: 'completed',
+            paidAt: new Date(),
+            // Optionally update status to processing if it was pending
+            ...(order.status === 'pending' ? { status: 'processing' } : {}),
+          } as any,
+        });
+
+        updatedOrders.push(updatedOrder.id);
+        this.logger.log(`✅ [PAYMENT_WEBHOOK] Updated order ${order.id} - payment confirmed`);
+      }
+
+      return {
+        success: true,
+        message: `Payment confirmed for ${updatedOrders.length} order(s)`,
+        data: {
+          updatedOrderIds: updatedOrders,
+        },
+      };
+
+    } catch (error) {
+      this.logger.error('❌ [PAYMENT_WEBHOOK] Error processing payment confirmation:', error);
+      return {
+        success: false,
+        error: 'Failed to process payment confirmation',
       };
     }
   }

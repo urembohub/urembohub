@@ -250,8 +250,17 @@ export class AnalyticsService {
       const recentOrders = await this.prisma.order.findMany({
         where: {
           retailerId,
-          paymentReference: { not: null },
-          paymentStatus: 'paid',
+          OR: [
+            // Regular paid orders
+            {
+              paymentReference: { not: null },
+              paymentStatus: 'paid',
+            },
+            // Customer pays at door orders (created immediately, payment pending)
+            {
+              paymentDueAtDoor: true,
+            } as any
+          ]
         },
         orderBy: { createdAt: 'desc' },
         take: limit,
@@ -261,6 +270,8 @@ export class AnalyticsService {
           status: true,
           createdAt: true,
           customerEmail: true,
+          paymentDueAtDoor: true,
+          paymentStatus: true,
           orderItems: {
             select: {
               title: true,
@@ -268,16 +279,20 @@ export class AnalyticsService {
               unitPrice: true,
             },
           },
-        },
+        } as any,
       });
 
-      return recentOrders.map(order => ({
+      return recentOrders.map((order: any) => ({
         id: order.id,
         totalAmount: order.totalAmount,
         status: order.status,
-        createdAt: order.createdAt.toISOString(),
+        createdAt: order.createdAt instanceof Date 
+          ? order.createdAt.toISOString() 
+          : new Date(order.createdAt).toISOString(),
         customerEmail: order.customerEmail,
-        orderItems: order.orderItems.map(item => ({
+        paymentDueAtDoor: order.paymentDueAtDoor || false,
+        paymentStatus: order.paymentStatus,
+        orderItems: order.orderItems.map((item: any) => ({
           title: item.title || 'Unknown Product',
           quantity: item.quantity,
           price: item.unitPrice,

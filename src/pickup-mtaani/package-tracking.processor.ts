@@ -35,13 +35,18 @@ export class PackageTrackingProcessor {
   async handlePackageTracking(job: Job<PackageTrackingJobData>) {
     const { orderId, packageId, businessId, retailerId, retailerName, customerEmail, customerName, retryCount = 0 } = job.data;
 
+    // Determine if this is a door delivery package
+    const isDoorDelivery = job.data.isDoorDelivery !== undefined ? job.data.isDoorDelivery : undefined;
+    const deliveryType = isDoorDelivery === true ? '🚪 DOOR DELIVERY' : isDoorDelivery === false ? '🚚 AGENT PICKUP' : '❓ UNKNOWN';
+
     this.logger.log(
-      `📦 [PACKAGE_TRACKING] Processing package ${packageId} for order ${orderId} (attempt ${retryCount + 1})`
+      `📦 [PACKAGE_TRACKING] Processing package ${packageId} for order ${orderId} ${deliveryType} (attempt ${retryCount + 1})`
     );
 
     try {
       // Fetch current package status from Pick Up Mtaani
-      const packageData = await this.pickupMtaaniService.getPackageByIdentifier(packageId, businessId);
+      // Use isDoorDelivery flag if available
+      const packageData = await this.pickupMtaaniService.getPackageByIdentifier(packageId, businessId, isDoorDelivery);
 
       if (!packageData) {
         this.logger.warn(`⚠️ [PACKAGE_TRACKING] Package ${packageId} not found in Pick Up Mtaani`);
@@ -98,7 +103,10 @@ export class PackageTrackingProcessor {
           packageTrackingId: packageData.trackId,
           packageReceiptNo: packageData.receipt_no,
           packageTrackingLink: this.normalizeTrackingLink(packageData.trackingLink),
-          packageTrackingHistory: packageData.agent_package_tracks?.descriptions || [],
+          packageTrackingHistory: 
+            packageData.door_step_package_tracks?.descriptions || 
+            packageData.agent_package_tracks?.descriptions || 
+            [],
         },
       });
 

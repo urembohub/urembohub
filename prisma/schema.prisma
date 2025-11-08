@@ -183,6 +183,7 @@ model Order {
   paymentMethod         String?                    @map("payment_method")
   paymentReference      String?                    @map("payment_reference")
   paymentStatus         String?                    @map("payment_status")
+  paymentDueAtDoor      Boolean                    @default(false) @map("payment_due_at_door")
   packageStatus         String?                    @map("package_status")
   packageTrackingId     String?                    @map("package_tracking_id")
   packageReceiptNo      String?                    @map("package_receipt_no")

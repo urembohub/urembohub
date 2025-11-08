@@ -4,7 +4,7 @@ import axios from "axios"
 import { CreateBusinessDto } from "./dto/create-business.dto"
 
 export interface CreatePackageDto {
-  receiverAgentId: number
+  receiverAgentId?: number // Optional for door delivery
   senderAgentId: number
   packageValue: number
   customerName: string
@@ -12,6 +12,12 @@ export interface CreatePackageDto {
   customerPhoneNumber: string
   paymentOption: "vendor" | "customer"
   on_delivery_balance: number
+  // Door delivery fields (optional) - matching API field names
+  doorstepDestinationId?: number
+  lat?: number
+  lng?: number
+  locationDescription?: string // API field name
+  payment_number?: string // API field name (snake_case) - For customer payment option
 }
 
 export interface PackageResponse {
@@ -40,6 +46,15 @@ export interface PackageResponse {
         descriptions: string
       }>
     }
+    door_step_package_tracks?: { // Doorstep packages use this field
+      descriptions: Array<{
+        time: number
+        state: string
+        descriptions: string
+      }>
+    }
+    agent_id?: number // Doorstep packages use this instead of senderAgentID_id
+    doorstep_destination_id?: number // Doorstep packages have this field
   }
 }
 
@@ -153,7 +168,34 @@ export class PickupMtaaniService {
         `📦 [CREATE_PACKAGE] Business ID: ${businessId}`
       )
 
-      const url = `${this.baseUrl}/packages/agent-agent?b_id=${businessId}`
+      // Determine delivery mode and endpoint
+      const isDoorDelivery = !!packageData.doorstepDestinationId
+      const endpoint = isDoorDelivery ? 'doorstep' : 'agent-agent'
+      const url = `${this.baseUrl}/packages/${endpoint}?b_id=${businessId}`
+
+      if (isDoorDelivery) {
+        this.logger.log(
+          `📦 [CREATE_PACKAGE] Delivery Mode: DOOR DELIVERY`
+        )
+        this.logger.log(
+          `📦 [CREATE_PACKAGE] Doorstep Destination ID: ${packageData.doorstepDestinationId}`
+        )
+        this.logger.log(
+          `📦 [CREATE_PACKAGE] Address: ${packageData.locationDescription}`
+        )
+        this.logger.log(
+          `📦 [CREATE_PACKAGE] Coordinates: ${packageData.lat}, ${packageData.lng}`
+        )
+        if (packageData.payment_number) {
+          this.logger.log(
+            `📦 [CREATE_PACKAGE] Payment Number: ${packageData.payment_number}`
+          )
+        }
+      } else {
+        this.logger.log(
+          `📦 [CREATE_PACKAGE] Delivery Mode: AGENT-AGENT`
+        )
+      }
 
       this.logger.log(`📦 [CREATE_PACKAGE] API URL: ${url}`)
 
@@ -285,14 +327,60 @@ export class PickupMtaaniService {
    * Get package status using business ID and package ID
    * @param packageId Pick Up Mtaani package ID
    * @param businessId Pickup Mtaani business ID for the retailer
+   * @param isDoorDelivery Optional: whether this is a doorstep package (defaults to trying both)
    * @returns Package status details
    */
-  async getPackageStatus(packageId: number, businessId: string): Promise<any> {
+  async getPackageStatus(packageId: number, businessId: string, isDoorDelivery?: boolean): Promise<any> {
     try {
       this.logger.log(`📦 Fetching status for package ${packageId}`)
 
+      // If we know it's a doorstep package, use doorstep endpoint
+      // Otherwise, try agent-agent first, then doorstep as fallback
+      if (isDoorDelivery === true) {
+        return this.getPackageStatusFromEndpoint(packageId, businessId, 'doorstep')
+      } else if (isDoorDelivery === false) {
+        return this.getPackageStatusFromEndpoint(packageId, businessId, 'agent-agent')
+      } else {
+        // Try both endpoints - start with agent-agent
+        try {
+          return await this.getPackageStatusFromEndpoint(packageId, businessId, 'agent-agent')
+        } catch (error) {
+          if (error.response?.status === 404) {
+            // If not found in agent-agent, try doorstep
+            this.logger.log(`📦 Package ${packageId} not found in agent-agent, trying doorstep endpoint...`)
+            try {
+              return await this.getPackageStatusFromEndpoint(packageId, businessId, 'doorstep')
+            } catch (doorstepError) {
+              // If both fail, throw the original error
+              throw error
+            }
+          } else {
+            throw error
+          }
+        }
+      }
+    } catch (error) {
+      this.logger.error(
+        `❌ Failed to fetch package status for ${packageId}:`,
+        error.response?.data || error.message
+      )
+      throw error
+    }
+  }
+
+  /**
+   * Get package status from a specific endpoint
+   * @param packageId Pick Up Mtaani package ID
+   * @param businessId Pickup Mtaani business ID for the retailer
+   * @param endpoint The endpoint type: 'agent-agent' or 'doorstep'
+   * @returns Package status details
+   */
+  private async getPackageStatusFromEndpoint(packageId: number, businessId: string, endpoint: 'agent-agent' | 'doorstep'): Promise<any> {
+    try {
+      this.logger.log(`📦 Fetching package ${packageId} status from ${endpoint} endpoint`)
+
       const response = await axios.get(
-        `${this.baseUrl}/packages/agent-agent?id=${packageId}&b_id=${businessId}`,
+        `${this.baseUrl}/packages/${endpoint}?id=${packageId}&b_id=${businessId}`,
         {
           headers: {
             accept: "application/json",
@@ -303,7 +391,7 @@ export class PickupMtaaniService {
       )
 
       this.logger.log(
-        `✅ Package status retrieved: ${response.data.data?.state}`
+        `✅ Package status retrieved from ${endpoint}: ${response.data.data?.state}`
       )
       
       // Debug: Log the complete response to see what fields are available
@@ -312,7 +400,7 @@ export class PickupMtaaniService {
       return response.data
     } catch (error) {
       this.logger.error(
-        `❌ Failed to fetch package status for ${packageId}:`,
+        `❌ Failed to fetch package status from ${endpoint} for ${packageId}:`,
         error.response?.data || error.message
       )
       throw error
@@ -460,10 +548,11 @@ export class PickupMtaaniService {
    * @param identifier Package ID or receipt number
    * @returns Package details with current status
    */
-  async getPackageByIdentifier(identifier: string | number, businessId: string): Promise<any> {
+  async getPackageByIdentifier(identifier: string | number, businessId: string, isDoorDelivery?: boolean): Promise<any> {
     try {
       // Try direct fetch first to get complete package details
-      const packageResponse = await this.getPackageStatus(Number(identifier), businessId)
+      // Try both endpoints if isDoorDelivery is not specified
+      const packageResponse = await this.getPackageStatus(Number(identifier), businessId, isDoorDelivery)
       if (packageResponse?.data) {
         return packageResponse.data
       }
@@ -757,6 +846,88 @@ export class PickupMtaaniService {
         success: false,
         error: error.response?.data?.message || error.message || "Failed to initiate STK push",
       }
+    }
+  }
+
+  /**
+   * Get delivery charge for agent-to-agent package
+   * @param senderAgentId The ID of the sender agent
+   * @param receiverAgentId The ID of the receiver agent
+   * @returns Delivery charge amount
+   */
+  async getDeliveryCharge(
+    senderAgentId: number,
+    receiverAgentId: number
+  ): Promise<number> {
+    try {
+      this.logger.log(
+        `💰 [DELIVERY_CHARGE] Fetching agent-agent delivery charge: ${senderAgentId} → ${receiverAgentId}`
+      )
+
+      const response = await axios.get(
+        `${this.baseUrl}/delivery-charge/agent-package?senderAgentID=${senderAgentId}&receiverAgentID=${receiverAgentId}`,
+        {
+          headers: {
+            accept: "application/json",
+            apiKey: this.apiKey,
+          },
+          timeout: 10000,
+        }
+      )
+
+      const charge = response.data?.data?.price || response.data?.price || 0
+      this.logger.log(`💰 [DELIVERY_CHARGE] Agent-agent charge: KES ${charge}`)
+      return charge
+    } catch (error) {
+      this.logger.error(
+        "❌ [DELIVERY_CHARGE] Failed to fetch agent-agent delivery charge:",
+        error.response?.data || error.message
+      )
+      return 0
+    }
+  }
+
+  /**
+   * Get delivery charge for door delivery package
+   * @param senderAgentId The ID of the sender agent
+   * @param doorstepDestinationId The ID of the doorstep destination
+   * @returns Delivery charge amount
+   */
+  async getDoorstepDeliveryCharge(
+    senderAgentId: number,
+    doorstepDestinationId: number
+  ): Promise<number> {
+    try {
+      this.logger.log(
+        `💰 [DELIVERY_CHARGE] Fetching doorstep delivery charge: ${senderAgentId} → ${doorstepDestinationId}`
+      )
+
+      const response = await axios.get(
+        `${this.baseUrl}/delivery-charge/doorstep-package?senderAgentID=${senderAgentId}&doorstepDestinationID=${doorstepDestinationId}`,
+        {
+          headers: {
+            accept: "application/json",
+            apiKey: this.apiKey,
+          },
+          timeout: 10000,
+        }
+      )
+
+      this.logger.log(`💰 [DELIVERY_CHARGE] Raw API response:`, JSON.stringify(response.data, null, 2))
+
+      // Pick Up Mtaani API might return data in different structures
+      const charge = response.data?.data?.price || 
+                    response.data?.price || 
+                    (typeof response.data === 'number' ? response.data : 0)
+      
+      this.logger.log(`💰 [DELIVERY_CHARGE] Extracted doorstep charge: KES ${charge}`)
+      return charge
+    } catch (error) {
+      this.logger.error(
+        "❌ [DELIVERY_CHARGE] Failed to fetch doorstep delivery charge:",
+        error.response?.data || error.message
+      )
+      return 0
     }
   }
 }

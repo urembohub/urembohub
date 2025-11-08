@@ -37,13 +37,18 @@ export class PackageTrackingProcessor {
   async handlePackageTracking(job: Job<PackageTrackingJobData>) {
     const { orderId, packageId, businessId, retailerId, retailerName, customerEmail, customerName } = job.data;
     
+    // Determine if this is a door delivery package
+    const isDoorDelivery = job.data.isDoorDelivery !== undefined ? job.data.isDoorDelivery : undefined;
+    const deliveryType = isDoorDelivery === true ? '🚪 DOOR DELIVERY' : isDoorDelivery === false ? '🚚 AGENT PICKUP' : '❓ UNKNOWN';
+    
     this.logger.log(
-      `📦 [PACKAGE_TRACKING] Processing package ${packageId} for order ${orderId} (Attempt ${job.attemptsMade + 1}/${job.opts.attempts})`
+      `📦 [PACKAGE_TRACKING] Processing package ${packageId} for order ${orderId} ${deliveryType} (Attempt ${job.attemptsMade + 1}/${job.opts.attempts})`
     );
 
     try {
       // Get current package status from Pickup Mtaani
-      const packageStatusResponse = await this.pickupMtaaniService.getPackageStatus(packageId, businessId);
+      // Use isDoorDelivery flag if available, otherwise let it try both endpoints
+      const packageStatusResponse = await this.pickupMtaaniService.getPackageStatus(packageId, businessId, isDoorDelivery);
       
       if (!packageStatusResponse || !packageStatusResponse.data) {
         throw new Error('Invalid package status response from Pickup Mtaani');
@@ -57,8 +62,9 @@ export class PackageTrackingProcessor {
       const trackingLink = packageData.trackingLink;
       
       // Map the correct field names from API response
-      const receiverAgentId = packageData.receieverAgentID_id; // Note: API has typo
-      const senderAgentId = packageData.senderAgentID_id;     // Note: API has typo
+      // Doorstep packages use agent_id (single), agent-agent use senderAgentID_id/receieverAgentID_id
+      const receiverAgentId = packageData.receieverAgentID_id || (packageData.type === 'doorstep' ? null : undefined);
+      const senderAgentId = packageData.senderAgentID_id || packageData.agent_id; // Doorstep uses agent_id
 
       this.logger.log(
         `📦 [PACKAGE_TRACKING] Package ${packageId} - State: ${currentState}, Payment: ${paymentStatus}, Tracking: ${trackingLink}`
@@ -143,8 +149,57 @@ export class PackageTrackingProcessor {
    */
   private async updateOrderPackageStatus(orderId: string, packageData: any, fullPackageResponse: any) {
     try {
+      // First, get the current order to update the package in shippingAddress
+      const order = await this.prisma.order.findUnique({
+        where: { id: orderId },
+        select: {
+          id: true,
+          shippingAddress: true,
+        },
+      });
+
+      if (!order) {
+        throw new Error(`Order ${orderId} not found`);
+      }
+
+      const shippingAddress = (order.shippingAddress as any) || {};
+      const packages = shippingAddress.pickupMtaaniPackages || [];
+      const packageId = fullPackageResponse.id;
+
+      // Find and update the specific package in the array
+      const packageIndex = packages.findIndex((pkg: any) => pkg.packageId === packageId);
+      if (packageIndex >= 0) {
+        // Update package with fresh data from Pick Up Mtaani
+        packages[packageIndex] = {
+          ...packages[packageIndex],
+          status: packageData.packageStatus,
+          paymentStatus: packageData.paymentStatus,
+          trackingLink: packageData.packageTrackingLink,
+          packageTrackingLink: packageData.packageTrackingLink,
+          packageTrackingId: packageData.packageTrackingId,
+          packageReceiptNo: packageData.packageReceiptNo,
+          deliveryFee: fullPackageResponse.delivery_fee || packages[packageIndex].deliveryFee,
+          receiptNo: fullPackageResponse.receipt_no || packages[packageIndex].receiptNo,
+          updatedAt: fullPackageResponse.createdAt || new Date().toISOString(),
+          // Update agent IDs - handle both agent-agent and doorstep packages
+          senderAgentId: fullPackageResponse.senderAgentID_id || fullPackageResponse.agent_id || packages[packageIndex].senderAgentId,
+          receiverAgentId: fullPackageResponse.receieverAgentID_id || packages[packageIndex].receiverAgentId,
+          // Update doorstep fields if present
+          doorstepDestinationId: fullPackageResponse.doorstep_destination_id || packages[packageIndex].doorstepDestinationId,
+          type: fullPackageResponse.type || packages[packageIndex].type,
+        };
+        
+        this.logger.log(`✅ [PACKAGE_TRACKING] Updated package ${packageId} in shippingAddress array`);
+      } else {
+        this.logger.warn(`⚠️ [PACKAGE_TRACKING] Package ${packageId} not found in shippingAddress.pickupMtaaniPackages`);
+      }
+
       // Extract tracking history from response
-      const trackingHistory = fullPackageResponse.agent_package_tracks?.descriptions || [];
+      // Doorstep packages use door_step_package_tracks, agent-agent use agent_package_tracks
+      const trackingHistory = 
+        fullPackageResponse.door_step_package_tracks?.descriptions || 
+        fullPackageResponse.agent_package_tracks?.descriptions || 
+        [];
       
       // Debug: Log what we're about to save
       this.logger.log(`🔍 [PACKAGE_TRACKING] About to update order ${orderId} with:`, {
@@ -171,6 +226,7 @@ export class PackageTrackingProcessor {
       await this.prisma.order.update({
         where: { id: orderId },
         data: {
+          // Update order-level fields (for backward compatibility)
           packageStatus: packageData.packageStatus,
           paymentStatus: packageData.paymentStatus,
           packageTrackingId: packageData.packageTrackingId,
@@ -178,6 +234,11 @@ export class PackageTrackingProcessor {
           packageTrackingLink: packageData.packageTrackingLink,
           packageTrackingHistory: trackingHistory, // Store full tracking history
           deliveryFee: fullPackageResponse.delivery_fee || null,
+          // Update shippingAddress with updated packages array
+          shippingAddress: {
+            ...shippingAddress,
+            pickupMtaaniPackages: packages,
+          },
           ...orderStatusUpdate, // Include order status update if payment is verified
           ...paymentStatusUpdate, // Include payment status update if payment is verified
         },

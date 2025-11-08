@@ -12,6 +12,8 @@ export interface PackageTrackingJobData {
   customerEmail: string;
   customerName: string;
   retryCount?: number;
+  isDoorDelivery?: boolean; // Track if this is a doorstep package
+  doorstepDestinationId?: number; // Door delivery destination ID
 }
 
 @Injectable()

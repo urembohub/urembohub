@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { OrdersService, CreateOrderDto, UpdateOrderDto } from './orders.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { order_status } from '@prisma/client';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { DisputeOrderDto } from './dto/dispute-order.dto';
@@ -24,8 +25,10 @@ export class OrdersController {
   @Get()
   async getAllOrders(
     @Query('status') status?: string,
+    @Query('paymentDueAtDoor') paymentDueAtDoor?: string,
   ) {
-    return this.ordersService.getAllOrders(status as any);
+    const paymentDueAtDoorBool = paymentDueAtDoor === 'true' ? true : paymentDueAtDoor === 'false' ? false : undefined;
+    return this.ordersService.getAllOrders(status as any, paymentDueAtDoorBool);
   }
 
   @Get(':id')
@@ -37,6 +40,21 @@ export class OrdersController {
   async createOrder(@Body() createOrderDto: CreateOrderDto) {
     // Allow both authenticated and guest users to create orders
     return this.ordersService.createOrder(null, createOrderDto);
+  }
+
+  @Post('create-doorstep-payment-due')
+  @UseGuards(OptionalJwtAuthGuard)
+  async createDoorstepPaymentDueOrder(@Body() createOrderDto: CreateOrderDto, @Request() req?: any) {
+    // Extract userId from authenticated user if available
+    // OptionalJwtAuthGuard allows the request even without a token (guest checkout)
+    const userId = req?.user?.sub || null;
+    console.log('📝 [DOORSTEP_ORDER] Creating doorstep payment due order:', {
+      userId,
+      customerEmail: createOrderDto.customerEmail,
+      hasUser: !!req?.user,
+      userEmail: req?.user?.email
+    });
+    return this.ordersService.createDoorstepPaymentDueOrder(userId, createOrderDto);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -59,8 +77,10 @@ export class OrdersController {
   @Get('my/orders')
   async getUserOrders(
     @Request() req,
+    @Query('paymentDueAtDoor') paymentDueAtDoor?: string,
   ) {
-    return this.ordersService.getUserOrders(req.user.sub);
+    const paymentDueAtDoorBool = paymentDueAtDoor === 'true' ? true : paymentDueAtDoor === 'false' ? false : undefined;
+    return this.ordersService.getUserOrders(req.user.sub, paymentDueAtDoorBool);
   }
 
   @UseGuards(JwtAuthGuard)
