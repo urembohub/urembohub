@@ -60,7 +60,10 @@ export class ServicesController {
   async getUserServices(
     @Request() req,
   ) {
-    return this.servicesService.getUserServices(req.user.sub);
+    // Ensure we're using the authenticated user's ID from the JWT token
+    const userId = req.user.sub || req.user.id;
+    console.log(`[ServicesController] getUserServices - Authenticated user ID: ${userId}`);
+    return this.servicesService.getUserServices(userId);
   }
 
   @Get('category/:category')

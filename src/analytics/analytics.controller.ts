@@ -56,6 +56,17 @@ export class AnalyticsController {
     return this.analyticsService.getRetailerDashboard(req.user.sub);
   }
 
+  // ✅ NEW: Unified vendor dashboard endpoint
+  @Get('vendor/dashboard')
+  @UseGuards(JwtAuthGuard)
+  async getVendorDashboard(@Request() req) {
+    // Ensure user is a vendor or admin
+    if (req.user.role !== 'vendor' && req.user.role !== 'admin') {
+      throw new Error('Access denied: Vendor dashboard is only available for vendors');
+    }
+    return this.analyticsService.getVendorDashboard(req.user.sub);
+  }
+
   // Get order analytics
   @Get('orders')
   @UseGuards(JwtAuthGuard)

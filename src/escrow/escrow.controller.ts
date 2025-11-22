@@ -16,7 +16,8 @@ export class EscrowController {
   @Post()
   @UseGuards(JwtAuthGuard)
   async createEscrow(@Body() createEscrowData: any, @Req() req: any) {
-    const userId = req.user.id;
+    // JWT strategy returns 'sub' not 'id'
+    const userId = req.user.sub || req.user.id;
     return await this.escrowService.createEscrow({
       ...createEscrowData,
       createdBy: userId,
@@ -30,15 +31,25 @@ export class EscrowController {
   @Put(':id/start')
   @UseGuards(JwtAuthGuard)
   async startService(@Param('id') escrowId: string, @Req() req: any) {
+    console.log('🚀 [ESCROW_CONTROLLER] ===========================================');
+    console.log('🚀 [ESCROW_CONTROLLER] PUT /escrow/:id/start called');
+    console.log('🚀 [ESCROW_CONTROLLER] ===========================================');
+    console.log('🚀 [ESCROW_CONTROLLER] Escrow ID:', escrowId);
+    console.log('🚀 [ESCROW_CONTROLLER] User ID:', req.user?.sub || req.user?.id);
+    console.log('🚀 [ESCROW_CONTROLLER] User Role:', req.user?.role);
+    
     if (req.user.role !== user_role.vendor) {
+      console.error('❌ [ESCROW_CONTROLLER] Access denied - only vendors can start services');
       throw new Error('Only vendors can start services');
     }
-    const vendorId = req.user.id;
+    // JWT strategy returns 'sub' not 'id'
+    const vendorId = req.user.sub || req.user.id;
+    console.log('✅ [ESCROW_CONTROLLER] User is vendor, proceeding to start service...');
     return await this.escrowService.startService(escrowId, vendorId);
   }
 
   /**
-   * Complete service (vendor only)
+   * Initiate service completion - generates code and sends email (vendor only)
    * PUT /escrow/:id/complete
    */
   @Put(':id/complete')
@@ -47,8 +58,28 @@ export class EscrowController {
     if (req.user.role !== user_role.vendor) {
       throw new Error('Only vendors can complete services');
     }
-    const vendorId = req.user.id;
+    // JWT strategy returns 'sub' not 'id'
+    const vendorId = req.user.sub || req.user.id;
     return await this.escrowService.completeService(escrowId, vendorId);
+  }
+
+  /**
+   * Verify completion code and complete service (vendor only)
+   * PUT /escrow/:id/verify-complete
+   */
+  @Put(':id/verify-complete')
+  @UseGuards(JwtAuthGuard)
+  async verifyAndCompleteService(
+    @Param('id') escrowId: string,
+    @Body() body: { verificationCode: string },
+    @Req() req: any
+  ) {
+    if (req.user.role !== user_role.vendor) {
+      throw new Error('Only vendors can verify and complete services');
+    }
+    // JWT strategy returns 'sub' not 'id'
+    const vendorId = req.user.sub || req.user.id;
+    return await this.escrowService.verifyAndCompleteService(escrowId, vendorId, body.verificationCode);
   }
 
   /**
@@ -62,7 +93,8 @@ export class EscrowController {
     if (req.user.role !== user_role.client) {
       throw new Error('Only customers can approve services');
     }
-    const customerId = req.user.id;
+    // JWT strategy returns 'sub' not 'id'
+    const customerId = req.user.sub || req.user.id;
     return await this.escrowService.approveService(escrowId, customerId);
   }
 
@@ -81,7 +113,8 @@ export class EscrowController {
     if (req.user.role !== user_role.client) {
       throw new Error('Only customers can dispute services');
     }
-    const customerId = req.user.id;
+    // JWT strategy returns 'sub' not 'id'
+    const customerId = req.user.sub || req.user.id;
     return await this.escrowService.disputeService(escrowId, customerId, disputeData.reason);
   }
 
@@ -100,7 +133,8 @@ export class EscrowController {
     if (req.user.role !== user_role.admin) {
       throw new Error('Only admins can release funds');
     }
-    const adminId = req.user.id;
+    // JWT strategy returns 'sub' not 'id'
+    const adminId = req.user.sub || req.user.id;
     return await this.escrowService.adminReleaseFunds(escrowId, adminId, releaseData.reason);
   }
 
@@ -119,7 +153,8 @@ export class EscrowController {
     if (req.user.role !== user_role.admin) {
       throw new Error('Only admins can refund customers');
     }
-    const adminId = req.user.id;
+    // JWT strategy returns 'sub' not 'id'
+    const adminId = req.user.sub || req.user.id;
     return await this.escrowService.adminRefundCustomer(escrowId, adminId, refundData.reason);
   }
 
@@ -181,6 +216,32 @@ export class EscrowController {
   }
 
   /**
+   * Get escrow statistics for vendor
+   * GET /escrow/vendor/:vendorId/stats
+   */
+  @Get('vendor/:vendorId/stats')
+  @UseGuards(JwtAuthGuard)
+  // Vendor or Admin
+  async getVendorEscrowStats(
+    @Param('vendorId') vendorId: string,
+    @Req() req: any
+  ) {
+    // JWT strategy returns 'sub' not 'id'
+    const userId = req.user.sub || req.user.id;
+    console.log(`[ESCROW_CONTROLLER] getVendorEscrowStats - Requested vendorId: ${vendorId}, Authenticated user ID: ${userId}, Role: ${req.user.role}`);
+    
+    // Check if user is the vendor or admin
+    if (userId !== vendorId && req.user.role !== user_role.admin) {
+      console.error(`[ESCROW_CONTROLLER] Access denied - User ${userId} trying to access vendor ${vendorId} stats`);
+      throw new Error('Access denied');
+    }
+    
+    const stats = await this.escrowService.getVendorEscrowStats(vendorId);
+    console.log(`[ESCROW_CONTROLLER] Returning stats for vendor ${vendorId}:`, stats);
+    return stats;
+  }
+
+  /**
    * Get escrows by vendor
    * GET /escrow/vendor/:vendorId
    */
@@ -192,12 +253,19 @@ export class EscrowController {
     @Req() req: any,
     @Query('status') status?: string
   ) {
+    // JWT strategy returns 'sub' not 'id'
+    const userId = req.user.sub || req.user.id;
+    console.log(`[ESCROW_CONTROLLER] getEscrowsByVendor - Requested vendorId: ${vendorId}, Authenticated user ID: ${userId}, Role: ${req.user.role}`);
+    
     // Check if user is the vendor or admin
-    if (req.user.id !== vendorId && req.user.role !== user_role.admin) {
+    if (userId !== vendorId && req.user.role !== user_role.admin) {
+      console.error(`[ESCROW_CONTROLLER] Access denied - User ${userId} trying to access vendor ${vendorId} escrows`);
       throw new Error('Access denied');
     }
     
-    return await this.escrowService.getEscrowsByVendor(vendorId, status as any);
+    const escrows = await this.escrowService.getEscrowsByVendor(vendorId, status as any);
+    console.log(`[ESCROW_CONTROLLER] Returning ${escrows.length} escrows for vendor ${vendorId}`);
+    return escrows;
   }
 
   /**
@@ -212,8 +280,10 @@ export class EscrowController {
     @Req() req: any,
     @Query('status') status?: string
   ) {
+    // JWT strategy returns 'sub' not 'id'
+    const userId = req.user.sub || req.user.id;
     // Check if user is the customer or admin
-    if (req.user.id !== customerId && req.user.role !== user_role.admin) {
+    if (userId !== customerId && req.user.role !== user_role.admin) {
       throw new Error('Access denied');
     }
     
@@ -241,7 +311,8 @@ export class EscrowController {
   @Get(':id')
   @UseGuards(JwtAuthGuard)
   async getEscrowById(@Param('id') escrowId: string, @Req() req: any) {
-    const userId = req.user.id;
+    // JWT strategy returns 'sub' not 'id'
+    const userId = req.user.sub || req.user.id;
     const escrow = await this.escrowService.getEscrowById(escrowId);
     
     // Check if escrow exists

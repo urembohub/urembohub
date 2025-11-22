@@ -15,8 +15,8 @@ export class CreateManufacturerOrderDto {
   notes?: string;
 
   @IsOptional()
-  @IsString()
-  shippingAddress?: string;
+  @IsObject()
+  shippingAddress?: any;
 
   @IsOptional()
   @IsString()

@@ -8,7 +8,8 @@ import {
   Param, 
   Query, 
   UseGuards, 
-  Request 
+  Request,
+  ForbiddenException
 } from '@nestjs/common';
 import { ManufacturerOrdersService } from './manufacturer-orders.service';
 import { CreateManufacturerOrderDto } from './dto/create-manufacturer-order.dto';
@@ -167,6 +168,36 @@ export class ManufacturerOrdersController {
     } else {
       return [];
     }
+  }
+
+  // Initialize payment for manufacturer order
+  @Post(':id/payment/initialize')
+  @UseGuards(JwtAuthGuard)
+  async initializePayment(
+    @Param('id') id: string,
+    @Request() req
+  ) {
+    // Verify user has permission (retailer who placed the order)
+    const order = await this.manufacturerOrdersService.getOrderById(id);
+    if (req.user.role !== 'admin' && order.retailerId !== req.user.sub) {
+      throw new ForbiddenException('You can only initialize payment for your own orders');
+    }
+    return this.manufacturerOrdersService.initializePayment(id);
+  }
+
+  // Calculate shipping for manufacturer order
+  @Post(':id/shipping/calculate')
+  @UseGuards(JwtAuthGuard)
+  async calculateShipping(
+    @Param('id') id: string,
+    @Request() req
+  ) {
+    // Verify user has permission
+    const order = await this.manufacturerOrdersService.getOrderById(id);
+    if (req.user.role !== 'admin' && order.retailerId !== req.user.sub && order.manufacturerId !== req.user.sub) {
+      throw new ForbiddenException('You can only calculate shipping for your own orders');
+    }
+    return this.manufacturerOrdersService.calculateShipping(id);
   }
 }
 

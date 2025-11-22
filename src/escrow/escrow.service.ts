@@ -163,6 +163,29 @@ export class EscrowService {
           service: true,
           customer: true,
           vendor: true,
+          order: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  email: true,
+                  fullName: true,
+                },
+              },
+            },
+            select: {
+              id: true,
+              customerEmail: true,
+              userId: true,
+              user: {
+                select: {
+                  id: true,
+                  email: true,
+                  fullName: true,
+                },
+              },
+            },
+          },
         }
       });
 
@@ -189,11 +212,128 @@ export class EscrowService {
   }
 
   /**
-   * Complete service (vendor marks service as completed)
+   * Vendor initiates service completion - generates code and sends email to customer
    */
   async completeService(escrowId: string, vendorId: string) {
     try {
-      console.log('✅ [ESCROW] Completing service...');
+      console.log('✅ [ESCROW] Initiating service completion...');
+      console.log('✅ [ESCROW] Escrow ID:', escrowId);
+      console.log('✅ [ESCROW] Vendor ID:', vendorId);
+
+      const escrow = await this.prisma.serviceEscrow.findFirst({
+        where: {
+          id: escrowId,
+          vendorId: vendorId,
+          status: EscrowStatus.in_progress,
+        },
+        include: {
+          service: true,
+          customer: true,
+          vendor: true,
+          order: {
+            include: {
+              user: true, // Get customer from order
+            },
+          },
+        }
+      });
+
+      if (!escrow) {
+        throw new NotFoundException('Escrow not found or not in progress');
+      }
+
+      // Generate a 6-digit verification code
+      const completionCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + 24); // Code expires in 24 hours
+
+      // Save the code to the escrow
+      const updatedEscrow = await this.prisma.serviceEscrow.update({
+        where: { id: escrowId },
+        data: {
+          completionCode,
+          completionCodeExpiresAt: expiresAt,
+        },
+        include: {
+          service: true,
+          customer: true,
+          vendor: true,
+          order: {
+            include: {
+              user: true,
+            },
+          },
+        }
+      });
+
+      // Get customer email - try from escrow.customer first, then from order.user, then from order.customerEmail
+      let customerEmail: string | null = null;
+      let customerName: string = 'Customer';
+
+      if (escrow.customer && escrow.customer.email) {
+        customerEmail = escrow.customer.email;
+        customerName = escrow.customer.fullName || escrow.customer.businessName || 'Customer';
+        console.log('📧 [ESCROW] Found customer from escrow.customer:', customerEmail);
+      } else if (escrow.order?.user && escrow.order.user.email) {
+        customerEmail = escrow.order.user.email;
+        customerName = escrow.order.user.fullName || escrow.order.user.businessName || 'Customer';
+        console.log('📧 [ESCROW] Found customer from order.user:', customerEmail);
+      } else if (escrow.order?.customerEmail) {
+        customerEmail = escrow.order.customerEmail;
+        customerName = 'Customer'; // We don't have the name from customerEmail field
+        console.log('📧 [ESCROW] Found customer email from order.customerEmail:', customerEmail);
+      }
+
+      // Send completion code email to customer
+      if (customerEmail) {
+        console.log('📧 [ESCROW] Attempting to send completion code email to:', customerEmail);
+        try {
+          const emailResult = await this.emailService.sendCustomerServiceCompletionCodeEmail({
+            customerEmail,
+            customerName,
+            serviceName: escrow.service.name,
+            vendorName: escrow.vendor.fullName || escrow.vendor.businessName || 'Vendor',
+            completionCode,
+            expiresAt,
+          });
+          console.log('📧 [ESCROW] Email send result:', emailResult);
+        } catch (emailError) {
+          console.error('❌ [ESCROW] Error sending completion code email:', emailError);
+          // Don't throw - we still want to save the code even if email fails
+        }
+      } else {
+        console.warn('⚠️ [ESCROW] No customer email found. Escrow customer:', escrow.customer, 'Order user:', escrow.order?.user, 'Order customerEmail:', escrow.order?.customerEmail);
+      }
+
+      // Log the action
+      await this.logAction({
+        escrowId,
+        actionType: ActionType.service_completed,
+        performedBy: vendorId,
+        metadata: {
+          serviceName: escrow.service.name,
+          completionCodeGenerated: true,
+          codeExpiresAt: expiresAt.toISOString(),
+        }
+      });
+
+      console.log('✅ [ESCROW] Completion code generated and email sent');
+      return {
+        ...updatedEscrow,
+        message: 'Verification code sent to customer. Please ask customer for the code to complete the service.',
+      };
+    } catch (error) {
+      console.error('❌ [ESCROW] Failed to initiate service completion:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Vendor verifies completion code and completes service
+   */
+  async verifyAndCompleteService(escrowId: string, vendorId: string, verificationCode: string) {
+    try {
+      console.log('✅ [ESCROW] Verifying completion code...');
       console.log('✅ [ESCROW] Escrow ID:', escrowId);
       console.log('✅ [ESCROW] Vendor ID:', vendorId);
 
@@ -214,9 +354,28 @@ export class EscrowService {
         throw new NotFoundException('Escrow not found or not in progress');
       }
 
+      // Check if code exists and matches
+      if (!escrow.completionCode) {
+        throw new NotFoundException('No completion code found. Please initiate service completion first.');
+      }
+
+      if (escrow.completionCode !== verificationCode) {
+        throw new Error('Invalid verification code. Please check the code and try again.');
+      }
+
+      // Check if code has expired
+      if (escrow.completionCodeExpiresAt && new Date() > escrow.completionCodeExpiresAt) {
+        throw new Error('Verification code has expired. Please initiate service completion again.');
+      }
+
+      // Code is valid - complete the service
       const updatedEscrow = await this.prisma.serviceEscrow.update({
         where: { id: escrowId },
-        data: { status: EscrowStatus.completed },
+        data: {
+          status: EscrowStatus.completed,
+          completionCode: null, // Clear the code after use
+          completionCodeExpiresAt: null,
+        },
         include: {
           service: true,
           customer: true,
@@ -231,6 +390,7 @@ export class EscrowService {
         performedBy: vendorId,
         metadata: {
           serviceName: escrow.service.name,
+          verified: true,
           completedAt: new Date().toISOString(),
         }
       });
@@ -238,10 +398,10 @@ export class EscrowService {
       // Send notifications
       await this.sendServiceCompletedNotifications(updatedEscrow);
 
-      console.log('✅ [ESCROW] Service completed successfully');
+      console.log('✅ [ESCROW] Service completed successfully after code verification');
       return updatedEscrow;
     } catch (error) {
-      console.error('❌ [ESCROW] Failed to complete service:', error);
+      console.error('❌ [ESCROW] Failed to verify and complete service:', error);
       throw error;
     }
   }
@@ -632,17 +792,46 @@ export class EscrowService {
    */
   private async sendServiceStartedNotifications(escrow: any) {
     try {
-      // Notify customer
+      console.log('📧 [ESCROW] Sending service started notifications...');
+      console.log('📧 [ESCROW] Escrow ID:', escrow.id);
+      
+      // Get customer email from multiple sources (priority order)
+      let customerEmail: string | null = null;
+      let customerName: string = 'Customer';
+      
       if (escrow.customer?.email) {
-        await this.emailService.sendCustomerServiceStartedEmail({
-          customerEmail: escrow.customer.email,
-          customerName: escrow.customer.fullName || escrow.customer.businessName,
-          serviceName: escrow.service.name,
-          vendorName: escrow.vendor.fullName || escrow.vendor.businessName,
+        customerEmail = escrow.customer.email;
+        customerName = escrow.customer.fullName || escrow.customer.businessName || 'Customer';
+        console.log('📧 [ESCROW] Found customer from escrow.customer:', customerEmail);
+      } else if (escrow.order?.user?.email) {
+        customerEmail = escrow.order.user.email;
+        customerName = escrow.order.user.fullName || 'Customer';
+        console.log('📧 [ESCROW] Found customer from order.user:', customerEmail);
+      } else if (escrow.order?.customerEmail) {
+        customerEmail = escrow.order.customerEmail;
+        customerName = customerEmail.split('@')[0] || 'Customer';
+        console.log('📧 [ESCROW] Found customer email from order.customerEmail:', customerEmail);
+      }
+      
+      // Notify customer
+      if (customerEmail) {
+        console.log('📧 [ESCROW] Sending service started email to:', customerEmail);
+        const emailResult = await this.emailService.sendCustomerServiceStartedEmail({
+          customerEmail,
+          customerName,
+          serviceName: escrow.service?.name || 'Service',
+          vendorName: escrow.vendor?.fullName || escrow.vendor?.businessName || 'Vendor',
         });
+        console.log('✅ [ESCROW] Service started email sent successfully:', emailResult);
+      } else {
+        console.warn('⚠️ [ESCROW] No customer email found for service started notification');
+        console.warn('⚠️ [ESCROW] Escrow customer:', escrow.customer);
+        console.warn('⚠️ [ESCROW] Order user:', escrow.order?.user);
+        console.warn('⚠️ [ESCROW] Order customerEmail:', escrow.order?.customerEmail);
       }
     } catch (error) {
       console.error('❌ [ESCROW] Failed to send service started notifications:', error);
+      console.error('❌ [ESCROW] Error details:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
     }
   }
 
@@ -817,7 +1006,10 @@ export class EscrowService {
       where.status = status;
     }
 
-    return await this.prisma.serviceEscrow.findMany({
+    console.log(`[ESCROW_SERVICE] getEscrowsByVendor called for vendorId: ${vendorId}, status: ${status || 'all'}`);
+    console.log(`[ESCROW_SERVICE] Query where clause:`, JSON.stringify(where, null, 2));
+
+    const escrows = await this.prisma.serviceEscrow.findMany({
       where,
       include: {
         service: true,
@@ -838,6 +1030,18 @@ export class EscrowService {
       },
       orderBy: { createdAt: 'desc' }
     });
+
+    console.log(`[ESCROW_SERVICE] Found ${escrows.length} escrows for vendor ${vendorId}`);
+    if (escrows.length > 0) {
+      console.log(`[ESCROW_SERVICE] Sample escrow vendor IDs:`, escrows.slice(0, 3).map(e => ({
+        escrowId: e.id,
+        vendorId: e.vendorId,
+        status: e.status,
+        amount: e.amount
+      })));
+    }
+
+    return escrows;
   }
 
   /**
@@ -923,6 +1127,140 @@ export class EscrowService {
       },
       orderBy: { createdAt: 'desc' }
     });
+  }
+
+  /**
+   * Get escrow statistics for a vendor
+   */
+  async getVendorEscrowStats(vendorId: string) {
+    try {
+      console.log(`[ESCROW_SERVICE] getVendorEscrowStats called for vendorId: ${vendorId}`);
+      
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      const [
+        totalEscrowBalance,
+        pendingEscrows,
+        inProgressEscrows,
+        completedEscrows,
+        releasedEscrows,
+        disputedEscrows,
+        releasedToday,
+        totalReleased,
+        totalPending,
+      ] = await Promise.all([
+        // Total escrow balance (pending + in_progress + completed)
+        this.prisma.serviceEscrow.aggregate({
+          where: {
+            vendorId,
+            status: {
+              in: [EscrowStatus.pending, EscrowStatus.in_progress, EscrowStatus.completed],
+            },
+          },
+          _sum: {
+            amount: true,
+          },
+        }),
+        
+        // Pending escrows count
+        this.prisma.serviceEscrow.count({
+          where: {
+            vendorId,
+            status: EscrowStatus.pending,
+          },
+        }),
+        
+        // In progress escrows count
+        this.prisma.serviceEscrow.count({
+          where: {
+            vendorId,
+            status: EscrowStatus.in_progress,
+          },
+        }),
+        
+        // Completed escrows count
+        this.prisma.serviceEscrow.count({
+          where: {
+            vendorId,
+            status: EscrowStatus.completed,
+          },
+        }),
+        
+        // Released escrows count
+        this.prisma.serviceEscrow.count({
+          where: {
+            vendorId,
+            status: EscrowStatus.released,
+          },
+        }),
+        
+        // Disputed escrows count
+        this.prisma.serviceEscrow.count({
+          where: {
+            vendorId,
+            status: EscrowStatus.disputed,
+          },
+        }),
+        
+        // Released today amount
+        this.prisma.serviceEscrow.aggregate({
+          where: {
+            vendorId,
+            status: EscrowStatus.released,
+            releasedAt: {
+              gte: today,
+              lt: tomorrow,
+            },
+          },
+          _sum: {
+            amount: true,
+          },
+        }),
+        
+        // Total released amount
+        this.prisma.serviceEscrow.aggregate({
+          where: {
+            vendorId,
+            status: EscrowStatus.released,
+          },
+          _sum: {
+            amount: true,
+          },
+        }),
+        
+        // Total pending amount
+        this.prisma.serviceEscrow.aggregate({
+          where: {
+            vendorId,
+            status: EscrowStatus.pending,
+          },
+          _sum: {
+            amount: true,
+          },
+        }),
+      ]);
+
+      const stats = {
+        totalEscrowBalance: Number(totalEscrowBalance._sum.amount) || 0,
+        pendingEscrows,
+        inProgressEscrows,
+        completedEscrows,
+        releasedEscrows,
+        disputedEscrows,
+        releasedToday: Number(releasedToday._sum.amount) || 0,
+        totalReleased: Number(totalReleased._sum.amount) || 0,
+        totalPending: Number(totalPending._sum.amount) || 0,
+      };
+
+      console.log(`[ESCROW_SERVICE] Stats for vendor ${vendorId}:`, stats);
+      return stats;
+    } catch (error) {
+      console.error('❌ [ESCROW_SERVICE] Error in getVendorEscrowStats:', error);
+      throw error;
+    }
   }
 
   /**

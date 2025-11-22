@@ -22,6 +22,12 @@ export class PaystackCheckoutService {
   ) {
     this.paystackSecretKey = this.configService.get<string>('PAYSTACK_SECRET_KEY');
     this.paystackPublicKey = this.configService.get<string>('PAYSTACK_PUBLIC_KEY');
+    
+    if (!this.paystackSecretKey) {
+      this.logger.error('⚠️ PAYSTACK_SECRET_KEY is not configured! Payment initialization will fail.');
+    } else {
+      this.logger.log(`✅ Paystack Secret Key configured (length: ${this.paystackSecretKey.length})`);
+    }
   }
 
   /**
@@ -50,6 +56,12 @@ export class PaystackCheckoutService {
       if (createPaymentDto.orderId.startsWith('cart-')) {
         console.log('💳 [PAYSTACK_CHECKOUT] Cart purchase detected, using cart payment flow');
         return await this.initializeCartPayment(createPaymentDto);
+      }
+
+      // Check if this is a manufacturer order (starts with 'manufacturer-order-')
+      if (createPaymentDto.orderId.startsWith('manufacturer-order-')) {
+        console.log('💳 [PAYSTACK_CHECKOUT] Manufacturer order detected, using manufacturer order payment flow');
+        return await this.initializeManufacturerOrderPayment(createPaymentDto);
       }
 
       console.log('💳 [PAYSTACK_CHECKOUT] Regular order detected, checking for multi-vendor...');
@@ -216,11 +228,31 @@ export class PaystackCheckoutService {
       } else {
         throw new Error(response.data.message || 'Failed to initialize payment');
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Payment initialization failed:', error);
+      
+      // Enhanced error logging
+      if (error.response) {
+        this.logger.error('Paystack API Error Response:', {
+          status: error.response.status,
+          statusText: error.response.statusText,
+          data: error.response.data,
+          url: error.config?.url,
+          method: error.config?.method,
+        });
+      } else if (error.request) {
+        this.logger.error('Paystack API Request Error:', {
+          message: error.message,
+          code: error.code,
+          url: error.config?.url,
+        });
+      } else {
+        this.logger.error('Paystack API Error:', error.message);
+      }
+      
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Payment initialization failed'
+        error: error.response?.data?.message || error.message || 'Payment initialization failed'
       };
     }
   }
@@ -827,6 +859,137 @@ export class PaystackCheckoutService {
       console.error('❌ [CART_PAYMENT] Cart payment initialization failed:', error);
       this.logger.error('Cart payment initialization failed:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Initialize payment for manufacturer order
+   */
+  private async initializeManufacturerOrderPayment(createPaymentDto: CreatePaymentDto) {
+    try {
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT] ===========================================');
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT] INITIALIZING MANUFACTURER ORDER PAYMENT');
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT] ===========================================');
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Order ID:', createPaymentDto.orderId);
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Customer Email:', createPaymentDto.customerEmail);
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Amount:', createPaymentDto.amount);
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Currency:', createPaymentDto.currency);
+
+      this.logger.log(`Initializing manufacturer order payment for order: ${createPaymentDto.orderId}`);
+
+      // Extract manufacturer order ID (remove 'manufacturer-order-' prefix)
+      const manufacturerOrderId = createPaymentDto.orderId.replace('manufacturer-order-', '');
+      
+      if (!manufacturerOrderId) {
+        throw new Error('Invalid manufacturer order ID format');
+      }
+
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Extracted order ID:', manufacturerOrderId);
+
+      // Get manufacturer order details
+      const manufacturerOrder = await this.prisma.manufacturerOrder.findUnique({
+        where: { id: manufacturerOrderId },
+        include: {
+          retailer: {
+            select: {
+              id: true,
+              email: true,
+              fullName: true,
+              phone: true,
+            }
+          },
+          manufacturer: {
+            select: {
+              id: true,
+              email: true,
+              fullName: true,
+              businessName: true,
+            }
+          },
+          product: {
+            select: {
+              id: true,
+              name: true,
+              price: true,
+            }
+          }
+        }
+      });
+
+      if (!manufacturerOrder) {
+        console.error('❌ [MANUFACTURER_ORDER_PAYMENT] Manufacturer order not found:', manufacturerOrderId);
+        throw new Error('Manufacturer order not found');
+      }
+
+      console.log('✅ [MANUFACTURER_ORDER_PAYMENT] Manufacturer order found:', manufacturerOrder.id);
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT] ORDER DETAILS:');
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT]   - Order ID:', manufacturerOrder.id);
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT]   - Retailer:', manufacturerOrder.retailer.email);
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT]   - Manufacturer:', manufacturerOrder.manufacturer.email);
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT]   - Product:', manufacturerOrder.product.name);
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT]   - Quantity:', manufacturerOrder.quantity);
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT]   - Total Amount:', manufacturerOrder.totalAmount);
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT]   - Currency:', manufacturerOrder.currency);
+
+      // Initialize Paystack payment directly (no commission splitting for manufacturer orders)
+      const paymentData = {
+        email: createPaymentDto.customerEmail || manufacturerOrder.retailer.email,
+        amount: createPaymentDto.amount || Number(manufacturerOrder.totalAmount),
+        currency: createPaymentDto.currency || manufacturerOrder.currency || 'KES',
+        reference: createPaymentDto.reference || `MFG-${manufacturerOrder.id}-${Date.now()}`,
+        metadata: {
+          ...createPaymentDto.metadata,
+          orderId: manufacturerOrder.id,
+          orderType: 'manufacturer_order',
+          retailerId: manufacturerOrder.retailer.id,
+          manufacturerId: manufacturerOrder.manufacturer.id,
+        },
+      };
+
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Initializing Paystack transaction...');
+
+      // Call Paystack API to initialize transaction
+      const response = await axios.post(
+        `${this.paystackBaseUrl}/transaction/initialize`,
+        paymentData,
+        {
+          headers: {
+            Authorization: `Bearer ${this.paystackSecretKey}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (response.data.status) {
+        const paymentResponse = response.data.data;
+        console.log('✅ [MANUFACTURER_ORDER_PAYMENT] Payment initialized successfully');
+        console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Reference:', paymentResponse.reference);
+        console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Authorization URL:', paymentResponse.authorization_url);
+
+        return {
+          success: true,
+          data: {
+            reference: paymentResponse.reference,
+            authorization_url: paymentResponse.authorization_url,
+            access_code: paymentResponse.access_code,
+          },
+        };
+      } else {
+        console.error('❌ [MANUFACTURER_ORDER_PAYMENT] Paystack API returned error:', response.data.message);
+        throw new Error(response.data.message || 'Failed to initialize payment');
+      }
+    } catch (error) {
+      console.error('❌ [MANUFACTURER_ORDER_PAYMENT] Manufacturer order payment initialization failed:', error);
+      this.logger.error('Manufacturer order payment initialization failed:', error);
+      
+      if (error.response?.data?.message) {
+        this.logger.error('Paystack API Error:', error.response.data.message);
+      }
+      
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message || 'Payment initialization failed'
+      };
     }
   }
 

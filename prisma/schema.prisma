@@ -151,53 +151,53 @@ model Service {
 }
 
 model Order {
-  id                    String                     @id @default(uuid())
-  userId                String?                    @map("user_id")
-  clientId              String?                    @map("client_id")
-  vendorId              String?                    @map("vendor_id")
-  retailerId            String?                    @map("retailer_id")
-  manufacturerId        String?                    @map("manufacturer_id")
-  serviceId             String?                    @map("service_id")
-  serviceType           String?                    @map("service_type")
-  totalAmount           Decimal                    @map("total_amount") @db.Decimal(10, 2)
-  currency              String                     @default("KES")
-  status                String                     @default("pending")
-  customerEmail         String                     @map("customer_email")
-  customerPhone         String?                    @map("customer_phone")
-  shippingAddress       Json?                      @map("shipping_address")
-  notes                 String?
-  escrowAmount          Decimal?                   @map("escrow_amount") @db.Decimal(10, 2)
-  escrowStatus          String?                    @map("escrow_status")
-  commissionAmount      Decimal?                   @map("commission_amount") @db.Decimal(10, 2)
-  commissionRate        Decimal?                   @map("commission_rate") @db.Decimal(5, 2)
-  paystackReference     String?                    @map("paystack_reference")
-  confirmedAt           DateTime?                  @map("confirmed_at")
-  completedAt           DateTime?                  @map("completed_at")
-  completionConfirmedAt DateTime?                  @map("completion_confirmed_at")
-  disputedAt            DateTime?                  @map("disputed_at")
-  autoReleaseAt         DateTime?                  @map("auto_release_at")
-  createdAt             DateTime                   @default(now()) @map("created_at")
-  updatedAt             DateTime                   @updatedAt @map("updated_at")
-  paidAt                DateTime?                  @map("paid_at")
-  paymentAmount         Decimal?                   @map("payment_amount") @db.Decimal(10, 2)
-  paymentMethod         String?                    @map("payment_method")
-  paymentReference      String?                    @map("payment_reference")
-  paymentStatus         String?                    @map("payment_status")
-  paymentDueAtDoor      Boolean                    @default(false) @map("payment_due_at_door")
-  packageStatus         String?                    @map("package_status")
-  packageTrackingId     String?                    @map("package_tracking_id")
-  packageReceiptNo      String?                    @map("package_receipt_no")
-  packageTrackingLink   String?                    @map("package_tracking_link")
-  packageTrackingHistory Json?                     @map("package_tracking_history")
-  deliveryFee           Decimal?                   @map("delivery_fee") @db.Decimal(10, 2)
-  orderItems            OrderItem[]
-  user                  Profile?                   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  paymentVerifications  PaymentVerificationQueue[]
-  payments              Payment[]
-  serviceAppointments   ServiceAppointment[]
-  escrows               ServiceEscrow[]
-  shipments             Shipment[]
-  tickets               Ticket[]
+  id                     String                     @id @default(uuid())
+  userId                 String?                    @map("user_id")
+  clientId               String?                    @map("client_id")
+  vendorId               String?                    @map("vendor_id")
+  retailerId             String?                    @map("retailer_id")
+  manufacturerId         String?                    @map("manufacturer_id")
+  serviceId              String?                    @map("service_id")
+  serviceType            String?                    @map("service_type")
+  totalAmount            Decimal                    @map("total_amount") @db.Decimal(10, 2)
+  currency               String                     @default("KES")
+  status                 String                     @default("pending")
+  customerEmail          String                     @map("customer_email")
+  customerPhone          String?                    @map("customer_phone")
+  shippingAddress        Json?                      @map("shipping_address")
+  notes                  String?
+  escrowAmount           Decimal?                   @map("escrow_amount") @db.Decimal(10, 2)
+  escrowStatus           String?                    @map("escrow_status")
+  commissionAmount       Decimal?                   @map("commission_amount") @db.Decimal(10, 2)
+  commissionRate         Decimal?                   @map("commission_rate") @db.Decimal(5, 2)
+  paystackReference      String?                    @map("paystack_reference")
+  confirmedAt            DateTime?                  @map("confirmed_at")
+  completedAt            DateTime?                  @map("completed_at")
+  completionConfirmedAt  DateTime?                  @map("completion_confirmed_at")
+  disputedAt             DateTime?                  @map("disputed_at")
+  autoReleaseAt          DateTime?                  @map("auto_release_at")
+  createdAt              DateTime                   @default(now()) @map("created_at")
+  updatedAt              DateTime                   @updatedAt @map("updated_at")
+  paidAt                 DateTime?                  @map("paid_at")
+  paymentAmount          Decimal?                   @map("payment_amount") @db.Decimal(10, 2)
+  paymentMethod          String?                    @map("payment_method")
+  paymentReference       String?                    @map("payment_reference")
+  paymentStatus          String?                    @map("payment_status")
+  paymentDueAtDoor       Boolean                    @default(false) @map("payment_due_at_door")
+  packageStatus          String?                    @map("package_status")
+  packageTrackingId      String?                    @map("package_tracking_id")
+  packageReceiptNo       String?                    @map("package_receipt_no")
+  packageTrackingLink    String?                    @map("package_tracking_link")
+  packageTrackingHistory Json?                      @map("package_tracking_history")
+  deliveryFee            Decimal?                   @map("delivery_fee") @db.Decimal(10, 2)
+  orderItems             OrderItem[]
+  user                   Profile?                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paymentVerifications   PaymentVerificationQueue[]
+  payments               Payment[]
+  serviceAppointments    ServiceAppointment[]
+  escrows                ServiceEscrow[]
+  shipments              Shipment[]
+  tickets                Ticket[]
 
   @@map("orders")
 }
@@ -289,21 +289,21 @@ model CommissionSettings {
 }
 
 model CommissionTransaction {
-  id                    String    @id @default(uuid())
-  businessUserId        String    @map("business_user_id")
-  businessRole          user_role @map("business_role")
-  transactionType       String    @map("transaction_type")
-  transactionId         String    @map("transaction_id")
-  transactionAmount     Decimal   @map("transaction_amount") @db.Decimal(10, 2)
-  commissionRate        Decimal   @map("commission_rate") @db.Decimal(5, 2)
-  commissionAmount      Decimal   @map("commission_amount") @db.Decimal(10, 2)
+  id                    String                  @id @default(uuid())
+  businessUserId        String                  @map("business_user_id")
+  businessRole          user_role               @map("business_role")
+  transactionType       String                  @map("transaction_type")
+  transactionId         String                  @map("transaction_id")
+  transactionAmount     Decimal                 @map("transaction_amount") @db.Decimal(10, 2)
+  commissionRate        Decimal                 @map("commission_rate") @db.Decimal(5, 2)
+  commissionAmount      Decimal                 @map("commission_amount") @db.Decimal(10, 2)
   paymentStatus         CommissionPaymentStatus @default(pending) @map("payment_status")
-  paymentMethodId       String?   @map("payment_method_id")
-  stripePaymentIntentId String?   @map("stripe_payment_intent_id")
-  processedAt           DateTime? @map("processed_at")
-  createdAt             DateTime  @default(now()) @map("created_at")
+  paymentMethodId       String?                 @map("payment_method_id")
+  stripePaymentIntentId String?                 @map("stripe_payment_intent_id")
+  processedAt           DateTime?               @map("processed_at")
+  createdAt             DateTime                @default(now()) @map("created_at")
   metadata              Json?
-  businessUser          Profile   @relation(fields: [businessUserId], references: [id], onDelete: Cascade)
+  businessUser          Profile                 @relation(fields: [businessUserId], references: [id], onDelete: Cascade)
 
   @@map("commission_transactions")
 }
@@ -1001,6 +1001,10 @@ model ManufacturerOrder {
   totalAmount           Decimal   @map("total_amount") @db.Decimal(10, 2)
   currency              String    @default("KES")
   status                String    @default("pending")
+  paymentStatus         String?   @default("pending") @map("payment_status")
+  paystackReference     String?   @map("paystack_reference")
+  paidAt                DateTime? @map("paid_at")
+  shippingAddress       Json?     @map("shipping_address")
   requestedDeliveryDate DateTime? @map("requested_delivery_date")
   estimatedDeliveryDate DateTime? @map("estimated_delivery_date")
   actualDeliveryDate    DateTime? @map("actual_delivery_date")
@@ -1046,29 +1050,31 @@ model PaystackSplit {
 }
 
 model ServiceEscrow {
-  id                String         @id @default(cuid())
-  orderId           String         @map("order_id")
-  serviceId         String         @map("service_id")
-  vendorId          String         @map("vendor_id")
-  customerId        String?        @map("customer_id")
-  amount            Decimal        @db.Decimal(10, 2)
-  currency          String         @default("KES")
-  status            EscrowStatus   @default(pending)
-  paystackReference String?        @map("paystack_reference")
-  holdReference     String?        @map("hold_reference")
-  createdAt         DateTime       @default(now()) @map("created_at")
-  releasedAt        DateTime?      @map("released_at")
-  autoReleaseDate   DateTime       @map("auto_release_date")
-  disputeReason     String?        @map("dispute_reason")
-  adminNotes        String?        @map("admin_notes")
-  createdBy         String?        @map("created_by")
-  updatedAt         DateTime       @updatedAt @map("updated_at")
-  actions           EscrowAction[]
-  creator           Profile?       @relation("CreatedEscrows", fields: [createdBy], references: [id])
-  customer          Profile?       @relation("CustomerEscrows", fields: [customerId], references: [id])
-  order             Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  service           Service        @relation(fields: [serviceId], references: [id], onDelete: Cascade)
-  vendor            Profile        @relation("VendorEscrows", fields: [vendorId], references: [id], onDelete: Cascade)
+  id                      String         @id @default(cuid())
+  orderId                 String         @map("order_id")
+  serviceId               String         @map("service_id")
+  vendorId                String         @map("vendor_id")
+  customerId              String?        @map("customer_id")
+  amount                  Decimal        @db.Decimal(10, 2)
+  currency                String         @default("KES")
+  status                  EscrowStatus   @default(pending)
+  paystackReference       String?        @map("paystack_reference")
+  holdReference           String?        @map("hold_reference")
+  createdAt               DateTime       @default(now()) @map("created_at")
+  releasedAt              DateTime?      @map("released_at")
+  autoReleaseDate         DateTime       @map("auto_release_date")
+  disputeReason           String?        @map("dispute_reason")
+  adminNotes              String?        @map("admin_notes")
+  createdBy               String?        @map("created_by")
+  completionCode          String?        @map("completion_code")
+  completionCodeExpiresAt DateTime?      @map("completion_code_expires_at")
+  updatedAt               DateTime       @updatedAt @map("updated_at")
+  actions                 EscrowAction[]
+  creator                 Profile?       @relation("CreatedEscrows", fields: [createdBy], references: [id])
+  customer                Profile?       @relation("CustomerEscrows", fields: [customerId], references: [id])
+  order                   Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  service                 Service        @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  vendor                  Profile        @relation("VendorEscrows", fields: [vendorId], references: [id], onDelete: Cascade)
 
   @@map("service_escrows")
 }
@@ -1111,10 +1117,10 @@ model PaymentVerificationQueue {
 }
 
 model OnboardingSettings {
-  id                String   @id @default(uuid())
-  useMultiStepForm  Boolean  @default(false) @map("use_multi_step_form")
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  id               String   @id @default(uuid())
+  useMultiStepForm Boolean  @default(false) @map("use_multi_step_form")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
   @@map("onboarding_settings")
 }

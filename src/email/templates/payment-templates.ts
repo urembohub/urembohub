@@ -18,15 +18,15 @@ export const getPaymentSuccessfulTemplate = (userName: string, paymentData: any)
         <table style="width: 100%; border-collapse: collapse; margin: 12px 0;">
           <tr>
             <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Payment ID:</td>
-            <td style="padding: 8px 0; color: hsl(var(--muted-foreground)); font-family: monospace;">${paymentData.paymentId}</td>
+            <td style="padding: 8px 0; color: hsl(var(--muted-foreground)); font-family: monospace;">${paymentData.paymentId || paymentData.payment_id || 'N/A'}</td>
           </tr>
           <tr>
             <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Amount:</td>
-            <td style="padding: 8px 0; color: hsl(var(--price-red)); font-weight: 700; font-size: 18px;">${paymentData.currency} ${paymentData.amount}</td>
+            <td style="padding: 8px 0; color: hsl(var(--price-red)); font-weight: 700; font-size: 18px;">${paymentData.currency || 'KES'} ${paymentData.amount || paymentData.total_amount || '0'}</td>
           </tr>
           <tr>
             <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Payment Method:</td>
-            <td style="padding: 8px 0; color: hsl(var(--muted-foreground));">${paymentData.method}</td>
+            <td style="padding: 8px 0; color: hsl(var(--muted-foreground));">${paymentData.method || paymentData.paymentMethod || 'Paystack'}</td>
           </tr>
           <tr>
             <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Date:</td>
@@ -40,7 +40,7 @@ export const getPaymentSuccessfulTemplate = (userName: string, paymentData: any)
   `;
 
   return {
-    subject: `Payment Successful - ${paymentData.currency} ${paymentData.amount}`,
+    subject: `Payment Successful - ${paymentData.currency || 'KES'} ${paymentData.amount || paymentData.total_amount || '0'}`,
     html: generateBaseEmailHTML({
       title: `Payment Successful! 💳`,
       preheader: `Your payment has been processed successfully.`,

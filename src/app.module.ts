@@ -37,6 +37,7 @@ import { PackageTrackingQueueModule } from "./pickup-mtaani/package-tracking-que
 import { QueueModule } from "./queue/queue.module"
 import { CommissionQueueModule } from "./commission/queue/commission-queue.module"
 import { QueueBullBoardModule } from "./queue/bull-board.module"
+import { VendorScheduleModule } from "./vendor-schedule/vendor-schedule.module"
 
 @Module({
   imports: [
@@ -78,6 +79,7 @@ import { QueueBullBoardModule } from "./queue/bull-board.module"
     CommissionQueueModule,
     QueueBullBoardModule,
     EmailQueueModule,
+    VendorScheduleModule,
   ],
   controllers: [AppController],
   providers: [AppService],

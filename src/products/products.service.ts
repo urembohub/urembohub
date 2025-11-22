@@ -1,12 +1,16 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { ManufacturerOrdersService } from '../manufacturer-orders/manufacturer-orders.service';
 import { user_role } from '@prisma/client';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 
 @Injectable()
 export class ProductsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private manufacturerOrdersService: ManufacturerOrdersService
+  ) {}
 
   async createProduct(userId: string, userRole: user_role, createProductDto: CreateProductDto) {
     // Only retailers and manufacturers can create products
@@ -69,7 +73,14 @@ export class ProductsService {
   }
 
   async getAllProducts(categoryId?: string, isActive = true) {
-    const where: any = { isActive };
+    const where: any = { 
+      isActive,
+      // Exclude products created by manufacturers - they should not appear in the shop
+      // This will include products with null createdByRole (legacy products) and all other roles
+      NOT: {
+        createdByRole: 'manufacturer'
+      }
+    };
     if (categoryId) {
       where.categoryId = categoryId;
     }
@@ -685,5 +696,327 @@ export class ProductsService {
         results: [],
       };
     }
+  }
+
+  // Get manufacturer products available for restocking a specific retailer product
+  async getManufacturerProductsForRestock(retailerProductId: string) {
+    console.log(`🔍 [getManufacturerProductsForRestock] Fetching for retailer product: ${retailerProductId}`);
+    
+    // Get the retailer product
+    const retailerProduct = await this.prisma.product.findUnique({
+      where: { id: retailerProductId },
+      include: {
+        category: true,
+        subcategory: true,
+      },
+    });
+
+    if (!retailerProduct) {
+      throw new NotFoundException('Retailer product not found');
+    }
+
+    console.log(`📦 [getManufacturerProductsForRestock] Retailer product:`, {
+      id: retailerProduct.id,
+      name: retailerProduct.name,
+      sku: retailerProduct.sku,
+      retailerId: retailerProduct.retailerId,
+      categoryId: retailerProduct.categoryId,
+      subcategoryId: retailerProduct.subcategoryId,
+    });
+
+    // Get all manufacturer profile IDs
+    const manufacturerProfiles = await this.prisma.profile.findMany({
+      where: {
+        role: 'manufacturer',
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    const manufacturerIds = manufacturerProfiles.map(p => p.id);
+    console.log(`🏭 [getManufacturerProductsForRestock] Found ${manufacturerIds.length} manufacturer profiles`);
+
+    if (manufacturerIds.length === 0) {
+      console.log(`⚠️ [getManufacturerProductsForRestock] No manufacturers found in system`);
+      return [];
+    }
+
+    // Build matching criteria: SKU first, then category/subcategory fallback
+    // Manufacturer products are identified by manufacturerId field
+    const where: any = {
+      isActive: true,
+      manufacturerId: {
+        not: null,
+        in: manufacturerIds, // manufacturerId must be in the list of manufacturer profile IDs
+      },
+      NOT: {
+        retailerId: retailerProduct.retailerId, // Exclude retailer's own products
+      },
+    };
+
+    // Primary match: SKU (case-insensitive)
+    if (retailerProduct.sku) {
+      where.sku = {
+        equals: retailerProduct.sku,
+        mode: 'insensitive',
+      };
+      console.log(`🔑 [getManufacturerProductsForRestock] Matching by SKU: ${retailerProduct.sku}`);
+    } else {
+      // Fallback: category + subcategory match
+      if (retailerProduct.categoryId) {
+        where.categoryId = retailerProduct.categoryId;
+      }
+      if (retailerProduct.subcategoryId) {
+        where.subcategoryId = retailerProduct.subcategoryId;
+      }
+      console.log(`📂 [getManufacturerProductsForRestock] Matching by category/subcategory`);
+    }
+
+    console.log(`🔍 [getManufacturerProductsForRestock] Query where clause:`, JSON.stringify(where, null, 2));
+
+    // Get matching manufacturer products
+    // Manufacturer products are identified by manufacturerId field
+    const manufacturerProducts = await this.prisma.product.findMany({
+      where,
+      include: {
+        retailer: {
+          select: {
+            id: true,
+            fullName: true,
+            businessName: true,
+            email: true,
+            phone: true,
+          },
+        },
+        category: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+        subcategory: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    console.log(`📦 [getManufacturerProductsForRestock] Found ${manufacturerProducts.length} manufacturer products before availability calculation`);
+
+    // Calculate available stock for each product and fetch manufacturer info
+    const productsWithAvailability = await Promise.all(
+      manufacturerProducts.map(async (product) => {
+        const reservedStock = await this.manufacturerOrdersService.calculateReservedStock(product.id);
+        const availableStock = Math.max(0, product.stockQuantity - reservedStock);
+
+        // Fetch manufacturer profile using manufacturerId
+        let manufacturer = null;
+        if (product.manufacturerId) {
+          manufacturer = await this.prisma.profile.findUnique({
+            where: { id: product.manufacturerId },
+            select: {
+              id: true,
+              fullName: true,
+              businessName: true,
+              email: true,
+              phone: true,
+            },
+          });
+        }
+
+        return {
+          ...product,
+          manufacturer: manufacturer || product.retailer, // Use manufacturer profile if available, fallback to retailer
+          manufacturerId: product.manufacturerId || product.retailerId, // Use manufacturerId if set
+          availableStock,
+          reservedStock,
+          stockStatus: availableStock <= 0 ? 'out_of_stock' : availableStock < 10 ? 'low_stock' : 'in_stock',
+        };
+      })
+    );
+
+    console.log(`✅ [getManufacturerProductsForRestock] Products with availability calculated: ${productsWithAvailability.length}`);
+
+    // Filter to only products with availability > 0
+    const filtered = productsWithAvailability.filter((p) => p.availableStock > 0);
+    console.log(`🎯 [getManufacturerProductsForRestock] After filtering (availableStock > 0): ${filtered.length} products`);
+
+    // If no products with availability > 0, return all products anyway so retailers can see what's available
+    if (filtered.length === 0 && productsWithAvailability.length > 0) {
+      console.log(`⚠️ [getManufacturerProductsForRestock] No products with availability > 0, returning all ${productsWithAvailability.length} products anyway`);
+      return productsWithAvailability;
+    }
+
+    return filtered;
+  }
+
+  // Get all available manufacturer products for a retailer to browse
+  async getAllAvailableManufacturerProducts(retailerId: string) {
+    console.log(`🔍 [getAllAvailableManufacturerProducts] Fetching for retailer: ${retailerId}`);
+    
+    // First, get all manufacturer profile IDs
+    const manufacturerProfiles = await this.prisma.profile.findMany({
+      where: {
+        role: 'manufacturer',
+      },
+      select: {
+        id: true,
+        businessName: true,
+        email: true,
+      },
+    });
+
+    const manufacturerIds = manufacturerProfiles.map(p => p.id);
+    console.log(`🏭 [getAllAvailableManufacturerProducts] Found ${manufacturerIds.length} manufacturer profiles:`, manufacturerProfiles);
+
+    if (manufacturerIds.length === 0) {
+      console.log(`⚠️ [getAllAvailableManufacturerProducts] No manufacturers found in system`);
+      return [];
+    }
+
+    // Debug: Check all products with manufacturer role or retailerId in manufacturer list
+    const allProductsCheck = await this.prisma.product.findMany({
+      where: {
+        isActive: true,
+      },
+      select: {
+        id: true,
+        name: true,
+        retailerId: true,
+        createdByRole: true,
+        stockQuantity: true,
+      },
+      take: 10,
+    });
+    console.log(`🔍 [getAllAvailableManufacturerProducts] Sample of all active products:`, allProductsCheck);
+
+    // Debug: Check products with manufacturerId set
+    const manufacturerProductsCheck = await this.prisma.product.findMany({
+      where: {
+        isActive: true,
+        manufacturerId: { not: null },
+      },
+      select: {
+        id: true,
+        name: true,
+        retailerId: true,
+        manufacturerId: true,
+        createdByRole: true,
+        stockQuantity: true,
+      },
+    });
+    console.log(`🔍 [getAllAvailableManufacturerProducts] Products with manufacturerId set:`, manufacturerProductsCheck.length, manufacturerProductsCheck);
+
+    // Get all active manufacturer products
+    // Manufacturer products are identified by manufacturerId field (not retailerId)
+    const whereClause: any = {
+      isActive: true,
+      manufacturerId: { 
+        not: null,
+        in: manufacturerIds, // manufacturerId must be in the list of manufacturer profile IDs
+      },
+      // Exclude products where retailerId matches the current retailer (their own products)
+      NOT: {
+        retailerId: retailerId,
+      },
+    };
+
+    console.log(`🔍 [getAllAvailableManufacturerProducts] Query where clause:`, JSON.stringify(whereClause, null, 2));
+
+    let manufacturerProducts = await this.prisma.product.findMany({
+      where: whereClause,
+      include: {
+        retailer: {
+          select: {
+            id: true,
+            fullName: true,
+            businessName: true,
+            email: true,
+            phone: true,
+            role: true, // Add role to verify
+          },
+        },
+        category: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            description: true,
+          },
+        },
+        subcategory: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            description: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    console.log(`📦 [getAllAvailableManufacturerProducts] Found ${manufacturerProducts.length} manufacturer products before availability calculation`);
+
+    // Calculate available stock for each product and fetch manufacturer info
+    const productsWithAvailability = await Promise.all(
+      manufacturerProducts.map(async (product) => {
+        const reservedStock = await this.manufacturerOrdersService.calculateReservedStock(product.id);
+        const availableStock = Math.max(0, product.stockQuantity - reservedStock);
+
+        // Fetch manufacturer profile using manufacturerId
+        let manufacturer = null;
+        if (product.manufacturerId) {
+          manufacturer = await this.prisma.profile.findUnique({
+            where: { id: product.manufacturerId },
+            select: {
+              id: true,
+              fullName: true,
+              businessName: true,
+              email: true,
+              phone: true,
+            },
+          });
+        }
+
+        console.log(`📊 [getAllAvailableManufacturerProducts] Product ${product.id} (${product.name}): stock=${product.stockQuantity}, reserved=${reservedStock}, available=${availableStock}, manufacturerId=${product.manufacturerId}`);
+
+        return {
+          ...product,
+          manufacturer: manufacturer || product.retailer, // Use manufacturer profile if available, fallback to retailer
+          manufacturerId: product.manufacturerId || product.retailerId, // Use manufacturerId if set
+          availableStock,
+          reservedStock,
+          stockStatus: availableStock <= 0 ? 'out_of_stock' : availableStock < 10 ? 'low_stock' : 'in_stock',
+        };
+      })
+    );
+
+    console.log(`✅ [getAllAvailableManufacturerProducts] Products with availability calculated: ${productsWithAvailability.length}`);
+
+    // Log each product's availability for debugging
+    productsWithAvailability.forEach((p, i) => {
+      console.log(`   Product ${i + 1}: ${p.name} - Available: ${p.availableStock}, Status: ${p.stockStatus}`);
+    });
+
+    // Filter to only products with availability > 0
+    const filtered = productsWithAvailability.filter((p) => p.availableStock > 0);
+    console.log(`🎯 [getAllAvailableManufacturerProducts] After filtering (availableStock > 0): ${filtered.length} products`);
+
+    // If no products with availability > 0, return all products anyway so retailers can see what's out of stock
+    // This helps them know what products exist even if currently unavailable
+    if (filtered.length === 0 && productsWithAvailability.length > 0) {
+      console.log(`⚠️ [getAllAvailableManufacturerProducts] No products with availability > 0, returning all ${productsWithAvailability.length} products anyway`);
+      return productsWithAvailability;
+    }
+
+    console.log(`📤 [getAllAvailableManufacturerProducts] Returning ${filtered.length} products to frontend`);
+    return filtered;
   }
 }

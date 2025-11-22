@@ -114,27 +114,29 @@ export class OrdersService {
       });
     }
 
-    // Send order confirmation email to customer
+    // Send "Order Received" email to customer (order is pending)
     try {
+      const customerName = orderData.customerEmail.split('@')[0]; // Extract name from email
       const orderDataForEmail = {
         orderId: order.id,
         totalAmount: orderData.totalAmount,
         currency: orderData.currency,
         items: cartItems.map(item => item.name)
       };
-      await this.emailService.sendNewOrderEmail(
+      await this.emailService.sendOrderReceivedEmail(
         orderData.customerEmail,
-        'Customer',
+        customerName,
         order.id,
         orderDataForEmail
       );
-      console.log('✅ [ORDER] Customer order confirmation email sent successfully!');
+      console.log('✅ [ORDER] Customer order received email sent successfully!');
     } catch (error) {
-      console.error('❌ [ORDER] Failed to send customer order confirmation email:', error);
+      console.error('❌ [ORDER] Failed to send customer order received email:', error);
       // Don't fail order creation if email fails
     }
 
     // Send notifications to vendors, retailers, and manufacturers
+    // For service orders, vendors will receive "Order Placed and Being Processed" email
     await this.sendOrderNotificationsToPartners(order.id, cartItems, orderData);
 
     return this.getOrderById(order.id);
@@ -265,23 +267,24 @@ export class OrdersService {
       }
     }
 
-    // Send order confirmation email to customer
+    // Send "Order Received" email to customer (order is pending)
     try {
+      const customerName = orderData.customerEmail.split('@')[0]; // Extract name from email
       const orderDataForEmail = {
         orderId: order.id,
         totalAmount: orderData.totalAmount,
         currency: orderData.currency,
         items: cartItems.map(item => item.name)
       };
-      await this.emailService.sendNewOrderEmail(
+      await this.emailService.sendOrderReceivedEmail(
         orderData.customerEmail,
-        'Customer',
+        customerName,
         order.id,
         orderDataForEmail
       );
-      console.log('✅ [DOORSTEP_PAYMENT] Customer order confirmation email sent successfully!');
+      console.log('✅ [DOORSTEP_PAYMENT] Customer order received email sent successfully!');
     } catch (error) {
-      console.error('❌ [DOORSTEP_PAYMENT] Failed to send customer order confirmation email:', error);
+      console.error('❌ [DOORSTEP_PAYMENT] Failed to send customer order received email:', error);
       // Don't fail order creation if email fails
     }
 
@@ -488,13 +491,23 @@ export class OrdersService {
           items: order.orderItems.map(item => item.title)
         };
         
+        // Only send order accepted email for product orders, not service orders
+        // Service orders should only send confirmation when vendor confirms appointment
         if (newStatus === 'paid') {
-          await this.emailService.sendOrderAcceptedEmail(
-            customerEmail,
-            customerName,
-            order.id,
-            orderData
-          );
+          // Check if this order has service appointments
+          const hasServiceAppointments = await this.prisma.serviceAppointment.findFirst({
+            where: { orderId: order.id }
+          });
+          
+          // Only send confirmation email if it's NOT a service order
+          if (!hasServiceAppointments) {
+            await this.emailService.sendOrderAcceptedEmail(
+              customerEmail,
+              customerName,
+              order.id,
+              orderData
+            );
+          }
         } else if (newStatus === 'shipped' || newStatus === 'in_transit') {
           await this.emailService.sendOrderShippedEmail(
             customerEmail,
@@ -884,18 +897,108 @@ export class OrdersService {
     });
   }
 
-  async getServiceAppointmentsByVendorId(vendorId: string) {
-    return this.prisma.serviceAppointment.findMany({
-      where: {
-        vendorId: vendorId,
-      },
-      include: {
-        order: {
-          select: {
-            createdAt: true,
-            clientId: true,
+  async getServiceAppointmentsByVendorId(vendorId: string, includeSensitiveData: boolean = true) {
+    console.log('🔍 [ORDERS_SERVICE] getServiceAppointmentsByVendorId called:', {
+      vendorId,
+      vendorIdType: typeof vendorId,
+      includeSensitiveData,
+    });
+    
+    try {
+      // Build select objects conditionally
+      const orderSelect: any = {
+        createdAt: true,
+      };
+      if (includeSensitiveData) {
+        orderSelect.clientId = true;
+      }
+      
+      const serviceSelect: any = {
+        id: true,
+        name: true,
+        vendorId: true,
+      };
+      if (includeSensitiveData) {
+        serviceSelect.price = true;
+      }
+      
+      const appointments = await this.prisma.serviceAppointment.findMany({
+        where: {
+          vendorId: vendorId,
+        },
+        include: {
+          order: {
+            select: orderSelect,
+          },
+          service: {
+            select: serviceSelect,
           },
         },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
+      
+      // For public/client access, only return essential booking info
+      const filteredAppointments = includeSensitiveData 
+        ? appointments 
+        : appointments.map(apt => ({
+            id: apt.id,
+            vendorId: apt.vendorId,
+            serviceId: apt.serviceId,
+            appointmentDate: apt.appointmentDate,
+            durationMinutes: apt.durationMinutes,
+            status: apt.status,
+            service: {
+              id: apt.service?.id,
+              name: apt.service?.name,
+              vendorId: apt.service?.vendorId,
+            },
+            order: {
+              createdAt: apt.order?.createdAt,
+            },
+          }));
+      
+      console.log('✅ [ORDERS_SERVICE] Found service appointments:', {
+        count: filteredAppointments.length,
+        vendorId,
+        includeSensitiveData,
+        sampleAppointments: filteredAppointments.slice(0, 3).map(apt => ({
+          id: apt.id,
+          serviceVendorId: apt.service?.vendorId,
+          appointmentVendorId: apt.vendorId,
+          appointmentDate: apt.appointmentDate,
+        })),
+      });
+      
+      return filteredAppointments;
+    } catch (error) {
+      console.error('❌ [ORDERS_SERVICE] Error fetching service appointments:', error);
+      throw error;
+    }
+  }
+
+  async updateServiceAppointmentStatus(
+    serviceAppointmentId: string,
+    userId: string,
+    userRole: string,
+    status: string,
+    notes?: string
+  ) {
+    console.log('📋 [APPOINTMENT] ===========================================');
+    console.log('📋 [APPOINTMENT] updateServiceAppointmentStatus called');
+    console.log('📋 [APPOINTMENT] ===========================================');
+    console.log('📋 [APPOINTMENT] Parameters:');
+    console.log('📋 [APPOINTMENT]   - serviceAppointmentId:', serviceAppointmentId);
+    console.log('📋 [APPOINTMENT]   - userId:', userId);
+    console.log('📋 [APPOINTMENT]   - userRole:', userRole);
+    console.log('📋 [APPOINTMENT]   - status:', status);
+    console.log('📋 [APPOINTMENT]   - notes:', notes || 'none');
+    
+    const serviceAppointment = await this.prisma.serviceAppointment.findUnique({
+      where: { id: serviceAppointmentId },
+      include: {
+        vendor: true,
         service: {
           select: {
             id: true,
@@ -903,9 +1006,412 @@ export class OrdersService {
             price: true,
           },
         },
+        order: {
+          select: {
+            id: true,
+            customerEmail: true,
+            userId: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                fullName: true,
+              },
+            },
+          },
+        },
       },
-      orderBy: {
-        createdAt: 'desc',
+    });
+
+    if (!serviceAppointment) {
+      console.error('❌ [APPOINTMENT] Service appointment not found:', serviceAppointmentId);
+      throw new NotFoundException('Service appointment not found');
+    }
+
+    console.log('✅ [APPOINTMENT] Service appointment found');
+    console.log('📋 [APPOINTMENT] Current appointment status:', serviceAppointment.status);
+    console.log('📋 [APPOINTMENT] New status requested:', status);
+    console.log('📋 [APPOINTMENT] Appointment vendorId:', serviceAppointment.vendorId);
+    console.log('📋 [APPOINTMENT] Order userId:', serviceAppointment.order.userId);
+
+    // Only the vendor, admin, or order owner can update
+    const canUpdate = 
+      serviceAppointment.vendorId === userId || 
+      userRole === 'ADMIN' ||
+      serviceAppointment.order.userId === userId;
+
+    if (!canUpdate) {
+      console.error('❌ [APPOINTMENT] Access denied');
+      console.error('❌ [APPOINTMENT] User ID:', userId);
+      console.error('❌ [APPOINTMENT] User Role:', userRole);
+      console.error('❌ [APPOINTMENT] Vendor ID:', serviceAppointment.vendorId);
+      throw new ForbiddenException('You cannot update this service appointment');
+    }
+
+    console.log('✅ [APPOINTMENT] User has permission to update');
+
+    const updatedAppointment = await this.prisma.serviceAppointment.update({
+      where: { id: serviceAppointmentId },
+      data: {
+        status,
+        notes: notes || serviceAppointment.notes,
+      },
+      include: {
+        service: {
+          select: {
+            id: true,
+            name: true,
+            price: true,
+          },
+        },
+        order: {
+          select: {
+            id: true,
+            customerEmail: true,
+            userId: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                fullName: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Send appointment status change emails to client
+    console.log('📧 [APPOINTMENT] ===========================================');
+    console.log('📧 [APPOINTMENT] Checking for email notifications...');
+    console.log('📧 [APPOINTMENT] ===========================================');
+    console.log('📧 [APPOINTMENT] Raw status (new):', status);
+    console.log('📧 [APPOINTMENT] Raw status (old):', serviceAppointment.status);
+    
+    const normalizedStatus = status.toUpperCase();
+    const normalizedOldStatus = serviceAppointment.status.toUpperCase();
+    
+    console.log('📧 [APPOINTMENT] Normalized status (new):', normalizedStatus);
+    console.log('📧 [APPOINTMENT] Normalized status (old):', normalizedOldStatus);
+    console.log('📧 [APPOINTMENT] Status changed?', normalizedStatus !== normalizedOldStatus);
+    
+    // Helper function to get customer email and name
+    const getCustomerInfo = () => {
+      console.log('📧 [APPOINTMENT] Getting customer info...');
+      console.log('📧 [APPOINTMENT]   - order.user?.email:', serviceAppointment.order.user?.email || 'undefined');
+      console.log('📧 [APPOINTMENT]   - order.customerEmail:', serviceAppointment.order.customerEmail || 'undefined');
+      
+      const customerEmail = serviceAppointment.order.user?.email || serviceAppointment.order.customerEmail;
+      if (!customerEmail) {
+        console.warn('⚠️ [APPOINTMENT] ⚠️⚠️⚠️ No customer email found for appointment ⚠️⚠️⚠️');
+        console.warn('⚠️ [APPOINTMENT] Appointment ID:', serviceAppointmentId);
+        console.warn('⚠️ [APPOINTMENT] Order.user:', serviceAppointment.order.user);
+        console.warn('⚠️ [APPOINTMENT] Order.customerEmail:', serviceAppointment.order.customerEmail);
+        return null;
+      }
+      const customerName = serviceAppointment.order.user?.fullName || customerEmail.split('@')[0] || 'Customer';
+      console.log('✅ [APPOINTMENT] Customer info found:', { customerEmail, customerName });
+      return { customerEmail, customerName };
+    };
+
+    // Helper function to prepare booking data
+    const prepareBookingData = () => {
+      console.log('📧 [APPOINTMENT] Preparing booking data...');
+      const appointmentDate = new Date(serviceAppointment.appointmentDate);
+      const durationMinutes = serviceAppointment.durationMinutes || 60;
+      const endTime = new Date(appointmentDate.getTime() + durationMinutes * 60000);
+      
+      const bookingData = {
+        bookingId: serviceAppointment.id,
+        serviceName: serviceAppointment.service?.name || 'Service',
+        appointmentDate: serviceAppointment.appointmentDate,
+        startTime: appointmentDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
+        endTime: endTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
+        price: serviceAppointment.servicePrice,
+        currency: serviceAppointment.currency || 'KES',
+      };
+      console.log('✅ [APPOINTMENT] Booking data prepared:', bookingData);
+      return bookingData;
+    };
+
+    // Send confirmation email when status changes to CONFIRMED
+    console.log('📧 [APPOINTMENT] Checking for CONFIRMED status...');
+    console.log('📧 [APPOINTMENT]   - normalizedStatus === "CONFIRMED":', normalizedStatus === 'CONFIRMED');
+    console.log('📧 [APPOINTMENT]   - normalizedOldStatus !== "CONFIRMED":', normalizedOldStatus !== 'CONFIRMED');
+    console.log('📧 [APPOINTMENT]   - Should send confirmation?', normalizedStatus === 'CONFIRMED' && normalizedOldStatus !== 'CONFIRMED');
+    
+    if (normalizedStatus === 'CONFIRMED' && normalizedOldStatus !== 'CONFIRMED') {
+      console.log('📧 [APPOINTMENT] ===========================================');
+      console.log('📧 [APPOINTMENT] Vendor confirmed appointment - sending email to client');
+      console.log('📧 [APPOINTMENT] ===========================================');
+      console.log('📧 [APPOINTMENT] Appointment ID:', serviceAppointmentId);
+      console.log('📧 [APPOINTMENT] Old Status:', normalizedOldStatus);
+      console.log('📧 [APPOINTMENT] New Status:', normalizedStatus);
+      
+      try {
+        const customerInfo = getCustomerInfo();
+        if (!customerInfo) {
+          return updatedAppointment;
+        }
+        
+        console.log('✅ [APPOINTMENT] Customer email found:', customerInfo.customerEmail);
+        console.log('📧 [APPOINTMENT] Customer name:', customerInfo.customerName);
+        
+        const bookingData = prepareBookingData();
+        
+        console.log('📧 [APPOINTMENT] Booking data prepared:', {
+          bookingId: bookingData.bookingId,
+          serviceName: bookingData.serviceName,
+          appointmentDate: bookingData.appointmentDate,
+          startTime: bookingData.startTime,
+          endTime: bookingData.endTime,
+        });
+
+        console.log('📧 [APPOINTMENT] Calling email service...');
+        const emailResult = await this.emailService.sendBookingConfirmedClientEmail(
+          customerInfo.customerEmail,
+          customerInfo.customerName,
+          bookingData
+        );
+        
+        console.log('📧 [APPOINTMENT] Email service returned:', JSON.stringify(emailResult, null, 2));
+        
+        if (emailResult?.success) {
+          console.log('✅ [APPOINTMENT] ✅✅✅ Appointment confirmation email sent successfully to client ✅✅✅');
+          console.log('✅ [APPOINTMENT] Customer:', customerInfo.customerEmail);
+          console.log('✅ [APPOINTMENT] Message ID:', emailResult.messageId || 'N/A');
+        } else {
+          console.error('❌ [APPOINTMENT] ❌❌❌ Failed to send appointment confirmation email ❌❌❌');
+          console.error('❌ [APPOINTMENT] Error:', emailResult?.error);
+        }
+      } catch (error) {
+        console.error('❌ [APPOINTMENT] ❌❌❌ Exception caught while sending appointment confirmation email ❌❌❌');
+        console.error('❌ [APPOINTMENT] Error type:', error?.constructor?.name);
+        console.error('❌ [APPOINTMENT] Error message:', error?.message);
+        console.error('❌ [APPOINTMENT] Error stack:', error?.stack);
+        // Don't fail status update if email fails
+      }
+    }
+
+    // Send cancelled email when status changes to CANCELLED
+    console.log('📧 [APPOINTMENT] ===========================================');
+    console.log('📧 [APPOINTMENT] Checking for CANCELLED status...');
+    console.log('📧 [APPOINTMENT] ===========================================');
+    console.log('📧 [APPOINTMENT]   - normalizedStatus:', normalizedStatus);
+    console.log('📧 [APPOINTMENT]   - normalizedStatus === "CANCELLED":', normalizedStatus === 'CANCELLED');
+    console.log('📧 [APPOINTMENT]   - normalizedOldStatus:', normalizedOldStatus);
+    console.log('📧 [APPOINTMENT]   - normalizedOldStatus !== "CANCELLED":', normalizedOldStatus !== 'CANCELLED');
+    console.log('📧 [APPOINTMENT]   - Combined condition:', normalizedStatus === 'CANCELLED' && normalizedOldStatus !== 'CANCELLED');
+    console.log('📧 [APPOINTMENT]   - Will enter cancellation block?', normalizedStatus === 'CANCELLED' && normalizedOldStatus !== 'CANCELLED');
+    
+    if (normalizedStatus === 'CANCELLED' && normalizedOldStatus !== 'CANCELLED') {
+      console.log('📧 [APPOINTMENT] ===========================================');
+      console.log('📧 [APPOINTMENT] ✅ ENTERING CANCELLATION EMAIL BLOCK ✅');
+      console.log('📧 [APPOINTMENT] Appointment cancelled - sending email to client');
+      console.log('📧 [APPOINTMENT] ===========================================');
+      console.log('📧 [APPOINTMENT] Appointment ID:', serviceAppointmentId);
+      console.log('📧 [APPOINTMENT] Old Status:', normalizedOldStatus);
+      console.log('📧 [APPOINTMENT] New Status:', normalizedStatus);
+      
+      try {
+        const customerInfo = getCustomerInfo();
+        if (!customerInfo) {
+          return updatedAppointment;
+        }
+        
+        console.log('✅ [APPOINTMENT] Customer email found:', customerInfo.customerEmail);
+        console.log('📧 [APPOINTMENT] Customer name:', customerInfo.customerName);
+        
+        const bookingData = prepareBookingData();
+        const cancellationReason = notes || undefined;
+        
+        console.log('📧 [APPOINTMENT] Booking data prepared:', {
+          bookingId: bookingData.bookingId,
+          serviceName: bookingData.serviceName,
+          appointmentDate: bookingData.appointmentDate,
+          cancellationReason: cancellationReason || 'none',
+        });
+
+        console.log('📧 [APPOINTMENT] ===========================================');
+        console.log('📧 [APPOINTMENT] Calling email service for cancellation...');
+        console.log('📧 [APPOINTMENT] ===========================================');
+        console.log('📧 [APPOINTMENT] Email parameters:');
+        console.log('📧 [APPOINTMENT]   - customerEmail:', customerInfo.customerEmail);
+        console.log('📧 [APPOINTMENT]   - customerName:', customerInfo.customerName);
+        console.log('📧 [APPOINTMENT]   - bookingData:', JSON.stringify(bookingData, null, 2));
+        console.log('📧 [APPOINTMENT]   - cancellationReason:', cancellationReason || 'none');
+        console.log('📧 [APPOINTMENT] Calling sendBookingCancelledClientEmail...');
+        
+        const emailResult = await this.emailService.sendBookingCancelledClientEmail(
+          customerInfo.customerEmail,
+          customerInfo.customerName,
+          bookingData,
+          cancellationReason
+        );
+        
+        console.log('📧 [APPOINTMENT] ===========================================');
+        console.log('📧 [APPOINTMENT] Email service returned:');
+        console.log('📧 [APPOINTMENT] ===========================================');
+        console.log('📧 [APPOINTMENT] Full result:', JSON.stringify(emailResult, null, 2));
+        
+        if (emailResult?.success) {
+          console.log('✅ [APPOINTMENT] ✅✅✅ Appointment cancelled email sent successfully to client ✅✅✅');
+          console.log('✅ [APPOINTMENT] Customer:', customerInfo.customerEmail);
+          console.log('✅ [APPOINTMENT] Message ID:', emailResult.messageId || 'N/A');
+        } else {
+          console.error('❌ [APPOINTMENT] ❌❌❌ Failed to send appointment cancelled email ❌❌❌');
+          console.error('❌ [APPOINTMENT] Error:', emailResult?.error);
+        }
+      } catch (error) {
+        console.error('❌ [APPOINTMENT] ❌❌❌ Exception caught while sending appointment cancelled email ❌❌❌');
+        console.error('❌ [APPOINTMENT] Error type:', error?.constructor?.name);
+        console.error('❌ [APPOINTMENT] Error message:', error?.message);
+        console.error('❌ [APPOINTMENT] Error stack:', error?.stack);
+        // Don't fail status update if email fails
+      }
+    } else {
+      console.log('📧 [APPOINTMENT] ===========================================');
+      console.log('📧 [APPOINTMENT] ⚠️ NOT entering cancellation block');
+      console.log('📧 [APPOINTMENT] ===========================================');
+      console.log('📧 [APPOINTMENT] Reason: Condition not met');
+      console.log('📧 [APPOINTMENT]   - normalizedStatus:', normalizedStatus);
+      console.log('📧 [APPOINTMENT]   - normalizedStatus === "CANCELLED":', normalizedStatus === 'CANCELLED');
+      console.log('📧 [APPOINTMENT]   - normalizedOldStatus:', normalizedOldStatus);
+      console.log('📧 [APPOINTMENT]   - normalizedOldStatus !== "CANCELLED":', normalizedOldStatus !== 'CANCELLED');
+    }
+
+    // Send rejected email when status changes to REJECTED
+    console.log('📧 [APPOINTMENT] ===========================================');
+    console.log('📧 [APPOINTMENT] Checking for REJECTED status...');
+    console.log('📧 [APPOINTMENT] ===========================================');
+    console.log('📧 [APPOINTMENT]   - normalizedStatus === "REJECTED":', normalizedStatus === 'REJECTED');
+    console.log('📧 [APPOINTMENT]   - normalizedOldStatus !== "REJECTED":', normalizedOldStatus !== 'REJECTED');
+    console.log('📧 [APPOINTMENT]   - Will enter rejection block?', normalizedStatus === 'REJECTED' && normalizedOldStatus !== 'REJECTED');
+    
+    if (normalizedStatus === 'REJECTED' && normalizedOldStatus !== 'REJECTED') {
+      console.log('📧 [APPOINTMENT] ===========================================');
+      console.log('📧 [APPOINTMENT] ✅ ENTERING REJECTION EMAIL BLOCK ✅');
+      console.log('📧 [APPOINTMENT] Appointment rejected - sending email to client');
+      console.log('📧 [APPOINTMENT] ===========================================');
+      console.log('📧 [APPOINTMENT] Appointment ID:', serviceAppointmentId);
+      console.log('📧 [APPOINTMENT] Old Status:', normalizedOldStatus);
+      console.log('📧 [APPOINTMENT] New Status:', normalizedStatus);
+      
+      try {
+        const customerInfo = getCustomerInfo();
+        if (!customerInfo) {
+          return updatedAppointment;
+        }
+        
+        console.log('✅ [APPOINTMENT] Customer email found:', customerInfo.customerEmail);
+        console.log('📧 [APPOINTMENT] Customer name:', customerInfo.customerName);
+        
+        const bookingData = prepareBookingData();
+        const rejectionReason = notes || undefined;
+        
+        console.log('📧 [APPOINTMENT] Booking data prepared:', {
+          bookingId: bookingData.bookingId,
+          serviceName: bookingData.serviceName,
+          appointmentDate: bookingData.appointmentDate,
+          rejectionReason: rejectionReason || 'none',
+        });
+
+        console.log('📧 [APPOINTMENT] Calling email service...');
+        const emailResult = await this.emailService.sendBookingRejectedClientEmail(
+          customerInfo.customerEmail,
+          customerInfo.customerName,
+          bookingData,
+          rejectionReason
+        );
+        
+        console.log('📧 [APPOINTMENT] Email service returned:', JSON.stringify(emailResult, null, 2));
+        
+        if (emailResult?.success) {
+          console.log('✅ [APPOINTMENT] ✅✅✅ Appointment rejected email sent successfully to client ✅✅✅');
+          console.log('✅ [APPOINTMENT] Customer:', customerInfo.customerEmail);
+          console.log('✅ [APPOINTMENT] Message ID:', emailResult.messageId || 'N/A');
+        } else {
+          console.error('❌ [APPOINTMENT] ❌❌❌ Failed to send appointment rejected email ❌❌❌');
+          console.error('❌ [APPOINTMENT] Error:', emailResult?.error);
+        }
+      } catch (error) {
+        console.error('❌ [APPOINTMENT] ❌❌❌ Exception caught while sending appointment rejected email ❌❌❌');
+        console.error('❌ [APPOINTMENT] Error type:', error?.constructor?.name);
+        console.error('❌ [APPOINTMENT] Error message:', error?.message);
+        console.error('❌ [APPOINTMENT] Error stack:', error?.stack);
+        // Don't fail status update if email fails
+      }
+    } else {
+      console.log('📧 [APPOINTMENT] ===========================================');
+      console.log('📧 [APPOINTMENT] ⚠️ NOT entering rejection block');
+      console.log('📧 [APPOINTMENT] ===========================================');
+      console.log('📧 [APPOINTMENT] Reason: Condition not met');
+      console.log('📧 [APPOINTMENT]   - normalizedStatus:', normalizedStatus);
+      console.log('📧 [APPOINTMENT]   - normalizedStatus === "REJECTED":', normalizedStatus === 'REJECTED');
+      console.log('📧 [APPOINTMENT]   - normalizedOldStatus:', normalizedOldStatus);
+      console.log('📧 [APPOINTMENT]   - normalizedOldStatus !== "REJECTED":', normalizedOldStatus !== 'REJECTED');
+    }
+
+    console.log('📧 [APPOINTMENT] ===========================================');
+    console.log('📧 [APPOINTMENT] Email notification checks completed');
+    console.log('📧 [APPOINTMENT] ===========================================');
+
+    return updatedAppointment;
+  }
+
+  async updateServiceAppointmentDate(
+    serviceAppointmentId: string,
+    userId: string,
+    userRole: string,
+    appointmentDate: string,
+    notes?: string
+  ) {
+    const serviceAppointment = await this.prisma.serviceAppointment.findUnique({
+      where: { id: serviceAppointmentId },
+      include: {
+        vendor: true,
+        order: {
+          include: {
+            user: true,
+          },
+        },
+      },
+    });
+
+    if (!serviceAppointment) {
+      throw new NotFoundException('Service appointment not found');
+    }
+
+    // Only the vendor, admin, or order owner can update
+    const canUpdate = 
+      serviceAppointment.vendorId === userId || 
+      userRole === 'ADMIN' ||
+      serviceAppointment.order.userId === userId;
+
+    if (!canUpdate) {
+      throw new ForbiddenException('You cannot update this service appointment');
+    }
+
+    return this.prisma.serviceAppointment.update({
+      where: { id: serviceAppointmentId },
+      data: {
+        appointmentDate: new Date(appointmentDate),
+        notes: notes || serviceAppointment.notes,
+      },
+      include: {
+        service: {
+          select: {
+            id: true,
+            name: true,
+            price: true,
+          },
+        },
+        order: {
+          select: {
+            id: true,
+            clientId: true,
+          },
+        },
       },
     });
   }
@@ -950,6 +1456,10 @@ export class OrdersService {
       for (const partner of partners) {
         try {
           const orderDataForPartner = {
+            orderId: orderId,
+            totalAmount: orderData.totalAmount,
+            currency: orderData.currency,
+            items: cartItems.map(item => item.name),
             order_number: orderId,
             customer_name: orderData.customerEmail,
             total_amount: orderData.totalAmount.toString(),

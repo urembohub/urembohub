@@ -7,7 +7,8 @@ import {
   getVerificationTemplate, 
   getPasswordResetTemplate, 
   getPasswordChangedTemplate, 
-  getSuspiciousLoginTemplate 
+  getSuspiciousLoginTemplate,
+  getPasswordResetOTPTemplate
 } from './templates/auth-templates';
 import { 
   getAccountCreatedTemplate, 
@@ -18,6 +19,8 @@ import {
 } from './templates/onboarding-templates';
 import { 
   getNewOrderTemplate, 
+  getOrderReceivedTemplate,
+  getOrderCreatedAfterPaymentTemplate,
   getOrderAcceptedTemplate, 
   getOrderShippedTemplate, 
   getOrderDeliveredTemplate 
@@ -25,7 +28,9 @@ import {
 import { 
   getBookingConfirmedClientTemplate, 
   getBookingConfirmedVendorTemplate, 
-  getBookingReminderTemplate 
+  getBookingReminderTemplate,
+  getBookingCancelledClientTemplate,
+  getBookingRejectedClientTemplate
 } from './templates/booking-templates';
 import { 
   getPaymentSuccessfulTemplate, 
@@ -37,6 +42,7 @@ import {
   getAdminEscrowCreatedTemplate,
   getCustomerServiceStartedTemplate,
   getCustomerServiceCompletedTemplate,
+  getCustomerServiceCompletionCodeTemplate,
   getAdminDisputeNotificationTemplate,
   getVendorDisputeNotificationTemplate,
   getVendorFundsReleasedTemplate,
@@ -72,7 +78,17 @@ export class EmailService {
   }
 
   async sendEmail(options: SendEmailOptions): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    console.log('📧 [SEND_EMAIL] ===========================================');
+    console.log('📧 [SEND_EMAIL] sendEmail method called');
+    console.log('📧 [SEND_EMAIL] ===========================================');
+    console.log('📧 [SEND_EMAIL] Options:');
+    console.log('📧 [SEND_EMAIL]   - to:', options.to);
+    console.log('📧 [SEND_EMAIL]   - subject:', options.subject);
+    console.log('📧 [SEND_EMAIL]   - html length:', options.html?.length || 0);
+    console.log('📧 [SEND_EMAIL]   - from:', options.from || 'Urembo Hub <noreply@urembohub.com>');
+    
     try {
+      console.log('📧 [SEND_EMAIL] Calling Resend API...');
       const { data, error } = await this.resend.emails.send({
         from: options.from || 'Urembo Hub <noreply@urembohub.com>',
         to: [options.to],
@@ -81,14 +97,26 @@ export class EmailService {
         replyTo: options.replyTo || 'support@urembohub.com',
       });
 
+      console.log('📧 [SEND_EMAIL] Resend API response received');
+      console.log('📧 [SEND_EMAIL]   - data:', JSON.stringify(data, null, 2));
+      console.log('📧 [SEND_EMAIL]   - error:', error ? JSON.stringify(error, null, 2) : 'null');
+      
       if (error) {
+        console.error('❌ [SEND_EMAIL] Resend API returned error');
+        console.error('❌ [SEND_EMAIL] Error details:', JSON.stringify(error, null, 2));
         this.logger.error('Failed to send email:', error);
         return { success: false, error: error.message };
       }
 
+      console.log('✅ [SEND_EMAIL] Email sent successfully!');
+      console.log('✅ [SEND_EMAIL] Message ID:', data?.id);
       this.logger.log(`Email sent successfully to ${options.to}, message ID: ${data?.id}`);
       return { success: true, messageId: data?.id };
     } catch (error) {
+      console.error('❌ [SEND_EMAIL] Exception caught in sendEmail');
+      console.error('❌ [SEND_EMAIL] Error type:', error?.constructor?.name);
+      console.error('❌ [SEND_EMAIL] Error message:', error?.message);
+      console.error('❌ [SEND_EMAIL] Error stack:', error?.stack);
       this.logger.error('Email service error:', error);
       return { 
         success: false, 
@@ -208,6 +236,53 @@ export class EmailService {
     });
   }
 
+  async sendOrderReceivedEmail(customerEmail: string, customerName: string, orderId: string, orderData: any): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const template = getOrderReceivedTemplate(customerName, orderId, orderData);
+    return this.sendEmail({
+      to: customerEmail,
+      subject: template.subject,
+      html: template.html,
+    });
+  }
+
+  async sendOrderCreatedAfterPaymentEmail(customerEmail: string, customerName: string, orderId: string, orderData: any): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    console.log('📧 [EMAIL_SERVICE] ===========================================');
+    console.log('📧 [EMAIL_SERVICE] sendOrderCreatedAfterPaymentEmail called');
+    console.log('📧 [EMAIL_SERVICE] ===========================================');
+    console.log('📧 [EMAIL_SERVICE] Parameters:');
+    console.log('📧 [EMAIL_SERVICE]   - customerEmail:', customerEmail);
+    console.log('📧 [EMAIL_SERVICE]   - customerName:', customerName);
+    console.log('📧 [EMAIL_SERVICE]   - orderId:', orderId);
+    console.log('📧 [EMAIL_SERVICE]   - orderData:', JSON.stringify(orderData, null, 2));
+    
+    try {
+      console.log('📧 [EMAIL_SERVICE] Step 1: Generating email template...');
+      const template = getOrderCreatedAfterPaymentTemplate(customerName, orderId, orderData);
+      console.log('✅ [EMAIL_SERVICE] Template generated successfully');
+      console.log('📧 [EMAIL_SERVICE] Template subject:', template.subject);
+      console.log('📧 [EMAIL_SERVICE] Template HTML length:', template.html?.length || 0);
+      
+      console.log('📧 [EMAIL_SERVICE] Step 2: Calling sendEmail...');
+      const result = await this.sendEmail({
+        to: customerEmail,
+        subject: template.subject,
+        html: template.html,
+      });
+      
+      console.log('📧 [EMAIL_SERVICE] sendEmail returned:', JSON.stringify(result, null, 2));
+      return result;
+    } catch (error) {
+      console.error('❌ [EMAIL_SERVICE] Exception in sendOrderCreatedAfterPaymentEmail:');
+      console.error('❌ [EMAIL_SERVICE] Error type:', error?.constructor?.name);
+      console.error('❌ [EMAIL_SERVICE] Error message:', error?.message);
+      console.error('❌ [EMAIL_SERVICE] Error stack:', error?.stack);
+      return {
+        success: false,
+        error: error?.message || 'Unknown error'
+      };
+    }
+  }
+
   async sendOrderAcceptedEmail(customerEmail: string, customerName: string, orderId: string, orderData: any): Promise<{ success: boolean; messageId?: string; error?: string }> {
     const template = getOrderAcceptedTemplate(customerName, orderId, orderData);
     return this.sendEmail({
@@ -256,6 +331,24 @@ export class EmailService {
 
   async sendBookingReminderEmail(clientEmail: string, clientName: string, bookingData: any): Promise<{ success: boolean; messageId?: string; error?: string }> {
     const template = getBookingReminderTemplate(clientName, bookingData);
+    return this.sendEmail({
+      to: clientEmail,
+      subject: template.subject,
+      html: template.html,
+    });
+  }
+
+  async sendBookingCancelledClientEmail(clientEmail: string, clientName: string, bookingData: any, reason?: string): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const template = getBookingCancelledClientTemplate(clientName, bookingData, reason);
+    return this.sendEmail({
+      to: clientEmail,
+      subject: template.subject,
+      html: template.html,
+    });
+  }
+
+  async sendBookingRejectedClientEmail(clientEmail: string, clientName: string, bookingData: any, reason?: string): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const template = getBookingRejectedClientTemplate(clientName, bookingData, reason);
     return this.sendEmail({
       to: clientEmail,
       subject: template.subject,
@@ -892,24 +985,7 @@ export class EmailService {
   }
 
   private getPasswordResetOTPTemplate(userName: string, otp: string): EmailTemplate {
-    return {
-      subject: 'Password Reset OTP',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h1 style="color: #dc3545; text-align: center;">Password Reset OTP</h1>
-          <p>Hi ${userName},</p>
-          <p>You requested to reset your password. Use the following OTP to proceed:</p>
-          <div style="text-align: center; margin: 30px 0;">
-            <div style="background: #f8f9fa; border: 2px solid #dc3545; padding: 20px; border-radius: 10px; display: inline-block;">
-              <h2 style="color: #dc3545; margin: 0; font-size: 32px; letter-spacing: 5px;">${otp}</h2>
-            </div>
-          </div>
-          <p>This OTP will expire in 10 minutes.</p>
-          <p>If you didn't request this, please ignore this email.</p>
-          <p>Best regards,<br>The Urembo Hub Team</p>
-        </div>
-      `
-    };
+    return getPasswordResetOTPTemplate(userName, otp);
   }
 
   private getPartnerSignupNotificationTemplate(partnerName: string): EmailTemplate {
@@ -1385,17 +1461,44 @@ export class EmailService {
     customerName: string;
     serviceName: string;
     vendorName: string;
-  }) {
+  }): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    console.log('📧 [EMAIL_SERVICE] ===========================================');
+    console.log('📧 [EMAIL_SERVICE] sendCustomerServiceStartedEmail called');
+    console.log('📧 [EMAIL_SERVICE] ===========================================');
+    console.log('📧 [EMAIL_SERVICE] Parameters:', JSON.stringify(data, null, 2));
+    
     try {
+      console.log('📧 [EMAIL_SERVICE] Step 1: Generating email template...');
       const template = getCustomerServiceStartedTemplate(data);
-      await this.sendEmail({
+      console.log('✅ [EMAIL_SERVICE] Template generated successfully');
+      console.log('📧 [EMAIL_SERVICE] Template HTML length:', template?.length || 0);
+      
+      console.log('📧 [EMAIL_SERVICE] Step 2: Calling sendEmail...');
+      const result = await this.sendEmail({
         to: data.customerEmail,
         subject: `Service Started - ${data.serviceName}`,
         html: template,
       });
-      console.log(`✅ [EMAIL] Customer service started email sent to: ${data.customerEmail}`);
+      
+      console.log('📧 [EMAIL_SERVICE] sendEmail returned:', JSON.stringify(result, null, 2));
+      
+      if (result?.success) {
+        console.log(`✅ [EMAIL] ✅✅✅ Customer service started email sent successfully to: ${data.customerEmail} ✅✅✅`);
+        console.log(`✅ [EMAIL] Message ID: ${result.messageId || 'N/A'}`);
+      } else {
+        console.error(`❌ [EMAIL] Failed to send customer service started email:`, result?.error);
+      }
+      
+      return result;
     } catch (error) {
-      console.error(`❌ [EMAIL] Failed to send customer service started email:`, error);
+      console.error('❌ [EMAIL_SERVICE] Exception in sendCustomerServiceStartedEmail:');
+      console.error('❌ [EMAIL_SERVICE] Error type:', error?.constructor?.name);
+      console.error('❌ [EMAIL_SERVICE] Error message:', error?.message);
+      console.error('❌ [EMAIL_SERVICE] Error stack:', error?.stack);
+      return {
+        success: false,
+        error: error?.message || 'Unknown error'
+      };
     }
   }
 
@@ -1419,6 +1522,50 @@ export class EmailService {
       console.log(`✅ [EMAIL] Customer service completed email sent to: ${data.customerEmail}`);
     } catch (error) {
       console.error(`❌ [EMAIL] Failed to send customer service completed email:`, error);
+    }
+  }
+
+  /**
+   * Send customer service completion code email
+   */
+  async sendCustomerServiceCompletionCodeEmail(data: {
+    customerEmail: string;
+    customerName: string;
+    serviceName: string;
+    vendorName: string;
+    completionCode: string;
+    expiresAt: Date;
+  }) {
+    try {
+      console.log(`📧 [EMAIL] Preparing to send completion code email to: ${data.customerEmail}`);
+      console.log(`📧 [EMAIL] Service: ${data.serviceName}, Code: ${data.completionCode}`);
+      
+      const template = getCustomerServiceCompletionCodeTemplate(data);
+      
+      if (!template || typeof template !== 'string') {
+        throw new Error('Template is not a valid string');
+      }
+      
+      console.log(`📧 [EMAIL] Template generated, length: ${template.length}`);
+      
+      const result = await this.sendEmail({
+        to: data.customerEmail,
+        subject: `Service Completion Verification Code - ${data.serviceName}`,
+        html: template,
+      });
+      
+      if (result.success) {
+        console.log(`✅ [EMAIL] Customer service completion code email sent to: ${data.customerEmail}, Message ID: ${result.messageId}`);
+      } else {
+        console.error(`❌ [EMAIL] Failed to send email: ${result.error}`);
+        throw new Error(result.error || 'Failed to send email');
+      }
+      
+      return result;
+    } catch (error) {
+      console.error(`❌ [EMAIL] Failed to send customer service completion code email:`, error);
+      console.error(`❌ [EMAIL] Error details:`, error instanceof Error ? error.stack : error);
+      throw error;
     }
   }
 

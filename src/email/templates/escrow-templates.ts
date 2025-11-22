@@ -222,6 +222,73 @@ export function getCustomerServiceCompletedTemplate(data: {
   });
 }
 
+// Customer Service Completion Code Email
+export function getCustomerServiceCompletionCodeTemplate(data: {
+  customerEmail: string;
+  customerName: string;
+  serviceName: string;
+  vendorName: string;
+  completionCode: string;
+  expiresAt: Date;
+}) {
+  const logoUrl = `${process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000'}/uploads/assets/logo.png`;
+  
+  return generateBaseEmailHTML({
+    title: 'Service Completion Verification Code',
+    content: `
+      <div style="text-align: center; padding: 20px;">
+        <h2 style="color: #2c3e50; margin-bottom: 20px;">🔐 Verification Code</h2>
+        <p style="font-size: 16px; color: #555; margin-bottom: 20px;">
+          The vendor has completed your service and needs a verification code to finalize the completion.
+        </p>
+        
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <h3 style="color: #2c3e50; margin-bottom: 15px;">Service Details</h3>
+          <p><strong>Service:</strong> ${data.serviceName}</p>
+          <p><strong>Vendor:</strong> ${data.vendorName}</p>
+        </div>
+        
+        <div style="background: #e3f2fd; padding: 25px; border-radius: 8px; margin: 20px 0; border: 2px solid #2196F3;">
+          <h3 style="color: #1976d2; margin-bottom: 15px; font-size: 24px;">Your Verification Code</h3>
+          <div style="background: white; padding: 20px; border-radius: 8px; display: inline-block; margin: 15px 0;">
+            <p style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #1976d2; margin: 0; font-family: 'Courier New', monospace;">
+              ${data.completionCode}
+            </p>
+          </div>
+          <p style="color: #666; font-size: 14px; margin-top: 10px;">
+            This code expires on ${data.expiresAt.toLocaleDateString()} at ${data.expiresAt.toLocaleTimeString()}
+          </p>
+        </div>
+        
+        <div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin: 20px 0;">
+          <h4 style="color: #856404; margin-bottom: 10px;">📋 What to do next:</h4>
+          <p style="margin: 5px 0; text-align: left;">1. Share this code with the vendor when they ask for verification</p>
+          <p style="margin: 5px 0; text-align: left;">2. The vendor will enter this code to complete the service</p>
+          <p style="margin: 5px 0; text-align: left;">3. Once verified, you can approve the service to release payment</p>
+        </div>
+        
+        <div style="background: #f8d7da; padding: 15px; border-radius: 8px; margin: 20px 0;">
+          <h4 style="color: #721c24; margin-bottom: 10px;">⚠️ Security Notice</h4>
+          <p style="margin: 5px 0; font-size: 14px; color: #721c24;">
+            Do not share this code with anyone except the vendor who completed your service. 
+            If you did not request this code, please contact support immediately.
+          </p>
+        </div>
+        
+        <p style="font-size: 14px; color: #666; margin-top: 20px;">
+          After the vendor verifies the code, you'll be able to approve the service and release payment, or dispute if there are any issues.
+        </p>
+      </div>
+    `,
+    variables: {
+      logo_url: logoUrl,
+      company_name: 'Urembo Hub',
+      support_email: 'support@urembohub.com',
+      base_url: process.env.FRONTEND_URL || 'http://localhost:8080'
+    }
+  });
+}
+
 // Admin Dispute Notification Email
 export function getAdminDisputeNotificationTemplate(data: {
   serviceName: string;

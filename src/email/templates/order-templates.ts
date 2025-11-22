@@ -5,15 +5,16 @@
 
 import { generateBaseEmailHTML } from './base-template';
 
+// Template for vendor: Order placed and being processed
 export const getNewOrderTemplate = (vendorName: string, orderId: string, orderData: any) => {
   const content = `
     <div class="content-section">
       <p class="text-body">Hi <strong>${vendorName}</strong>,</p>
       
-      <p class="text-body">You have received a new order! A customer has placed an order and is waiting for your confirmation.</p>
+      <p class="text-body">A new order has been placed and is being processed. A customer has booked your service and is waiting for your confirmation.</p>
       
       <div class="highlight-box">
-        <span class="status-badge status-info">New Order</span>
+        <span class="status-badge status-info">Order Placed</span>
         <h3 style="margin: 12px 0; color: hsl(var(--primary)); font-size: 18px; font-weight: 600;">Order Details:</h3>
         <table style="width: 100%; border-collapse: collapse; margin: 12px 0;">
           <tr>
@@ -31,18 +32,134 @@ export const getNewOrderTemplate = (vendorName: string, orderId: string, orderDa
         </table>
       </div>
       
-      <p class="text-body">Please review the order details and confirm or decline within 24 hours. The customer is eagerly waiting for your response!</p>
+      <p class="text-body">Please review the order details in your dashboard and accept the appointment when ready. The customer will be notified once you confirm.</p>
     </div>
   `;
 
   return {
-    subject: `New Order Received - ${orderId}`,
+    subject: `New Order Placed - ${orderId}`,
     html: generateBaseEmailHTML({
-      title: `New Order Received!`,
-      preheader: `A customer has placed an order. Review and confirm within 24 hours.`,
+      title: `New Order Placed!`,
+      preheader: `A customer has placed an order. Review and accept the appointment in your dashboard.`,
       content,
       cta_button: {
         text: 'Review Order',
+        url: `https://urembohub.com/vendor/schedule`,
+        style: 'primary'
+      },
+      variables: {
+        company_name: 'Urembo Hub',
+        support_email: 'support@urembohub.com',
+        base_url: 'https://urembohub.com',
+        logo_url: `${process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000'}/uploads/assets/logo.png`
+      }
+    })
+  };
+};
+
+// Template for client: Order received (pending status)
+export const getOrderReceivedTemplate = (customerName: string, orderId: string, orderData: any) => {
+  const content = `
+    <div class="content-section">
+      <p class="text-body">Hi <strong>${customerName}</strong>,</p>
+      
+      <p class="text-body">Thank you for your order! We have received your booking request and it is currently pending confirmation.</p>
+      
+      <div class="highlight-box">
+        <span class="status-badge status-info">Order Received</span>
+        <h3 style="margin: 12px 0; color: hsl(var(--primary)); font-size: 18px; font-weight: 600;">Order Summary:</h3>
+        <table style="width: 100%; border-collapse: collapse; margin: 12px 0;">
+          <tr>
+            <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Order ID:</td>
+            <td style="padding: 8px 0; color: hsl(var(--muted-foreground)); font-family: monospace;">${orderId}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Total Amount:</td>
+            <td style="padding: 8px 0; color: hsl(var(--price-red)); font-weight: 700; font-size: 18px;">${orderData.currency} ${orderData.totalAmount}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Items:</td>
+            <td style="padding: 8px 0; color: hsl(var(--muted-foreground));">${orderData.items?.length || 0} item(s)</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Status:</td>
+            <td style="padding: 8px 0; color: hsl(var(--muted-foreground));">Pending Confirmation</td>
+          </tr>
+        </table>
+      </div>
+      
+      <p class="text-body">Your order is being processed. Once payment is confirmed and the vendor accepts your appointment, you will receive a confirmation email with your visit details.</p>
+      
+      <p class="text-body">You can track your order status from your dashboard at any time.</p>
+    </div>
+  `;
+
+  return {
+    subject: `Order Received - ${orderId}`,
+    html: generateBaseEmailHTML({
+      title: `Order Received! 📦`,
+      preheader: `We've received your order and it's being processed.`,
+      content,
+      cta_button: {
+        text: 'Track Order',
+        url: `https://urembohub.com/orders/${orderId}`,
+        style: 'primary'
+      },
+      variables: {
+        company_name: 'Urembo Hub',
+        support_email: 'support@urembohub.com',
+        base_url: 'https://urembohub.com',
+        logo_url: `${process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000'}/uploads/assets/logo.png`
+      }
+    })
+  };
+};
+
+// Template for client: Order created after payment (awaiting vendor confirmation)
+export const getOrderCreatedAfterPaymentTemplate = (customerName: string, orderId: string, orderData: any) => {
+  const content = `
+    <div class="content-section">
+      <p class="text-body">Hi <strong>${customerName}</strong>,</p>
+      
+      <p class="text-body">Great news! Your payment has been processed successfully and your order has been placed. Your order is now waiting for approval.</p>
+      
+      <div class="highlight-box">
+        <span class="status-badge status-info">Order Placed</span>
+        <h3 style="margin: 12px 0; color: hsl(var(--primary)); font-size: 18px; font-weight: 600;">Order Summary:</h3>
+        <table style="width: 100%; border-collapse: collapse; margin: 12px 0;">
+          <tr>
+            <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Order ID:</td>
+            <td style="padding: 8px 0; color: hsl(var(--muted-foreground)); font-family: monospace;">${orderId}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Total Amount:</td>
+            <td style="padding: 8px 0; color: hsl(var(--price-red)); font-weight: 700; font-size: 18px;">${orderData.currency} ${orderData.totalAmount}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Items:</td>
+            <td style="padding: 8px 0; color: hsl(var(--muted-foreground));">${orderData.items?.length || 0} item(s)</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Status:</td>
+            <td style="padding: 8px 0; color: hsl(var(--muted-foreground));">Waiting for Approval</td>
+          </tr>
+        </table>
+      </div>
+      
+      <p class="text-body">Your order has been successfully placed and payment has been processed. The vendor will review and approve your order. Once approved, you'll receive a confirmation email with your visit details.</p>
+      
+      <p class="text-body">You can track your order status from your dashboard at any time.</p>
+    </div>
+  `;
+
+  return {
+    subject: `Order Placed - ${orderId}`,
+    html: generateBaseEmailHTML({
+      title: `Order Placed! ✅`,
+      preheader: `Your payment was successful and your order is waiting for approval.`,
+      content,
+      cta_button: {
+        text: 'Track Order',
         url: `https://urembohub.com/orders/${orderId}`,
         style: 'primary'
       },

@@ -220,3 +220,56 @@ export const getSuspiciousLoginTemplate = (userName: string, loginIp: string, lo
     })
   };
 };
+
+export const getPasswordResetOTPTemplate = (userName: string, otp: string) => {
+  const content = `
+    <div class="content-section">
+      <p class="text-body">Hi <strong>${userName}</strong>,</p>
+      
+      <p class="text-body">You requested to reset your password for your Urembo Hub account. Use the OTP code below to proceed with resetting your password.</p>
+      
+      <div class="highlight-box" style="text-align: center; padding: 30px 20px;">
+        <h3 style="margin: 0 0 20px 0; color: hsl(var(--primary)); font-size: 18px; font-weight: 600;">Your Password Reset Code</h3>
+        <div style="background: hsl(var(--muted)); border: 3px solid hsl(var(--primary)); padding: 25px; border-radius: 12px; display: inline-block; margin: 20px 0;">
+          <div style="font-size: 42px; font-weight: 700; color: hsl(var(--primary)); letter-spacing: 8px; font-family: 'Courier New', monospace;">
+            ${otp}
+          </div>
+        </div>
+        <p style="margin: 20px 0 0 0; color: hsl(var(--muted-foreground)); font-size: 14px;">
+          This code will expire in <strong>10 minutes</strong> for your security.
+        </p>
+      </div>
+      
+      <div style="background: hsl(var(--accent)); padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <h4 style="margin: 0 0 12px 0; color: hsl(var(--primary)); font-size: 16px; font-weight: 600;">Security Notice</h4>
+        <ul style="margin: 0; padding-left: 20px; color: hsl(var(--foreground));">
+          <li style="margin-bottom: 6px;">Never share this code with anyone</li>
+          <li style="margin-bottom: 6px;">Urembo Hub will never ask for your OTP</li>
+          <li style="margin-bottom: 6px;">If you didn't request this, please ignore this email</li>
+        </ul>
+      </div>
+      
+      <p class="text-body">Enter this code in the password reset form to create a new password. If you didn't request a password reset, you can safely ignore this email and your password will remain unchanged.</p>
+    </div>
+  `;
+
+  return {
+    subject: `Password Reset Code - Urembo Hub`,
+    html: generateBaseEmailHTML({
+      title: `Password Reset Code`,
+      preheader: `Use this code to reset your password.`,
+      content,
+      cta_button: {
+        text: 'Reset Password',
+        url: 'https://urembohub.com/auth/reset-password',
+        style: 'warning'
+      },
+      variables: {
+        company_name: 'Urembo Hub',
+        support_email: 'support@urembohub.com',
+        base_url: 'https://urembohub.com',
+        logo_url: `${process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000'}/uploads/assets/logo.png`
+      }
+    })
+  };
+};

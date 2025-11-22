@@ -104,26 +104,9 @@ export class AppointmentsService {
       },
     });
 
-    // Send booking confirmation email
-    try {
-      const bookingData = {
-        bookingId: appointment.id,
-        serviceName: appointment.service.name,
-        appointmentDate: appointment.appointmentDate,
-        startTime: appointment.startTime,
-        endTime: appointment.endTime,
-        price: appointment.service.price,
-        currency: appointment.currency
-      };
-      await this.emailService.sendBookingConfirmedClientEmail(
-        appointment.client.email,
-        appointment.client.fullName || 'Customer',
-        bookingData
-      );
-    } catch (error) {
-      console.error('Failed to send booking confirmation email:', error);
-      // Don't fail appointment creation if email fails
-    }
+    // Note: Booking confirmation email is NOT sent here
+    // It should only be sent when the vendor confirms the appointment
+    // via updateAppointmentStatus or updateServiceAppointmentStatus
 
     return appointment;
   }
@@ -297,7 +280,20 @@ export class AppointmentsService {
   }
 
   async updateAppointmentStatus(id: string, updateStatusDto: UpdateAppointmentStatusDto) {
+    console.log('📋 [APPOINTMENT_SERVICE] ===========================================');
+    console.log('📋 [APPOINTMENT_SERVICE] updateAppointmentStatus called');
+    console.log('📋 [APPOINTMENT_SERVICE] ===========================================');
+    console.log('📋 [APPOINTMENT_SERVICE] Appointment ID:', id);
+    console.log('📋 [APPOINTMENT_SERVICE] Status DTO:', JSON.stringify(updateStatusDto, null, 2));
+    
     const appointment = await this.getAppointmentById(id);
+    
+    console.log('✅ [APPOINTMENT_SERVICE] Appointment found');
+    console.log('📋 [APPOINTMENT_SERVICE] Current status:', appointment.status);
+    console.log('📋 [APPOINTMENT_SERVICE] New status:', updateStatusDto.status);
+
+    const oldStatus = appointment.status;
+    const newStatus = updateStatusDto.status;
 
     const updateData: any = {
       status: updateStatusDto.status,
@@ -316,7 +312,7 @@ export class AppointmentsService {
       updateData.completionConfirmedAt = new Date();
     }
 
-    return this.prisma.appointment.update({
+    const updatedAppointment = await this.prisma.appointment.update({
       where: { id },
       data: updateData,
       include: {
@@ -348,6 +344,155 @@ export class AppointmentsService {
         },
       },
     });
+
+    // Send email notifications for status changes
+    console.log('📧 [APPOINTMENT_SERVICE] ===========================================');
+    console.log('📧 [APPOINTMENT_SERVICE] Checking for email notifications...');
+    console.log('📧 [APPOINTMENT_SERVICE] ===========================================');
+    console.log('📧 [APPOINTMENT_SERVICE] Old status:', oldStatus);
+    console.log('📧 [APPOINTMENT_SERVICE] New status:', newStatus);
+    
+    const normalizedOldStatus = oldStatus?.toUpperCase() || '';
+    const normalizedNewStatus = newStatus?.toUpperCase() || '';
+    
+    console.log('📧 [APPOINTMENT_SERVICE] Normalized old status:', normalizedOldStatus);
+    console.log('📧 [APPOINTMENT_SERVICE] Normalized new status:', normalizedNewStatus);
+    console.log('📧 [APPOINTMENT_SERVICE] Status changed?', normalizedOldStatus !== normalizedNewStatus);
+
+    // Helper function to prepare booking data
+    const prepareBookingData = () => {
+      const appointmentDate = new Date(updatedAppointment.appointmentDate);
+      const durationMinutes = updatedAppointment.durationMinutes || updatedAppointment.service?.durationMinutes || 60;
+      const endTime = new Date(appointmentDate.getTime() + durationMinutes * 60000);
+      
+      return {
+        bookingId: updatedAppointment.id,
+        serviceName: updatedAppointment.service?.name || 'Service',
+        appointmentDate: updatedAppointment.appointmentDate,
+        startTime: appointmentDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
+        endTime: endTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
+        price: updatedAppointment.totalAmount || updatedAppointment.service?.price || 0,
+        currency: updatedAppointment.currency || 'KES',
+      };
+    };
+
+    // Send cancelled email when status changes to CANCELLED
+    console.log('📧 [APPOINTMENT_SERVICE] Checking for CANCELLED status...');
+    console.log('📧 [APPOINTMENT_SERVICE]   - normalizedNewStatus === "CANCELLED":', normalizedNewStatus === 'CANCELLED');
+    console.log('📧 [APPOINTMENT_SERVICE]   - normalizedOldStatus !== "CANCELLED":', normalizedOldStatus !== 'CANCELLED');
+    console.log('📧 [APPOINTMENT_SERVICE]   - Will send cancellation email?', normalizedNewStatus === 'CANCELLED' && normalizedOldStatus !== 'CANCELLED');
+    
+    if (normalizedNewStatus === 'CANCELLED' && normalizedOldStatus !== 'CANCELLED') {
+      console.log('📧 [APPOINTMENT_SERVICE] ===========================================');
+      console.log('📧 [APPOINTMENT_SERVICE] ✅ SENDING CANCELLATION EMAIL ✅');
+      console.log('📧 [APPOINTMENT_SERVICE] ===========================================');
+      
+      try {
+        const clientEmail = updatedAppointment.client?.email;
+        const clientName = updatedAppointment.client?.fullName || clientEmail?.split('@')[0] || 'Customer';
+        
+        if (!clientEmail) {
+          console.warn('⚠️ [APPOINTMENT_SERVICE] No client email found, skipping cancellation email');
+          console.warn('⚠️ [APPOINTMENT_SERVICE] Client:', updatedAppointment.client);
+          return updatedAppointment;
+        }
+        
+        console.log('✅ [APPOINTMENT_SERVICE] Client email found:', clientEmail);
+        console.log('📧 [APPOINTMENT_SERVICE] Client name:', clientName);
+        
+        const bookingData = prepareBookingData();
+        const cancellationReason = updateStatusDto.notes || undefined;
+        
+        console.log('📧 [APPOINTMENT_SERVICE] Booking data:', JSON.stringify(bookingData, null, 2));
+        console.log('📧 [APPOINTMENT_SERVICE] Cancellation reason:', cancellationReason || 'none');
+        console.log('📧 [APPOINTMENT_SERVICE] Calling sendBookingCancelledClientEmail...');
+        
+        const emailResult = await this.emailService.sendBookingCancelledClientEmail(
+          clientEmail,
+          clientName,
+          bookingData,
+          cancellationReason
+        );
+        
+        console.log('📧 [APPOINTMENT_SERVICE] Email result:', JSON.stringify(emailResult, null, 2));
+        
+        if (emailResult?.success) {
+          console.log('✅ [APPOINTMENT_SERVICE] ✅✅✅ Cancellation email sent successfully ✅✅✅');
+          console.log('✅ [APPOINTMENT_SERVICE] Message ID:', emailResult.messageId || 'N/A');
+        } else {
+          console.error('❌ [APPOINTMENT_SERVICE] Failed to send cancellation email');
+          console.error('❌ [APPOINTMENT_SERVICE] Error:', emailResult?.error);
+        }
+      } catch (error) {
+        console.error('❌ [APPOINTMENT_SERVICE] Exception while sending cancellation email');
+        console.error('❌ [APPOINTMENT_SERVICE] Error:', error?.message);
+        console.error('❌ [APPOINTMENT_SERVICE] Stack:', error?.stack);
+      }
+    } else {
+      console.log('📧 [APPOINTMENT_SERVICE] Not sending cancellation email (condition not met)');
+    }
+
+    // Send rejected email when status changes to REJECTED
+    console.log('📧 [APPOINTMENT_SERVICE] Checking for REJECTED status...');
+    console.log('📧 [APPOINTMENT_SERVICE]   - normalizedNewStatus === "REJECTED":', normalizedNewStatus === 'REJECTED');
+    console.log('📧 [APPOINTMENT_SERVICE]   - normalizedOldStatus !== "REJECTED":', normalizedOldStatus !== 'REJECTED');
+    console.log('📧 [APPOINTMENT_SERVICE]   - Will send rejection email?', normalizedNewStatus === 'REJECTED' && normalizedOldStatus !== 'REJECTED');
+    
+    if (normalizedNewStatus === 'REJECTED' && normalizedOldStatus !== 'REJECTED') {
+      console.log('📧 [APPOINTMENT_SERVICE] ===========================================');
+      console.log('📧 [APPOINTMENT_SERVICE] ✅ SENDING REJECTION EMAIL ✅');
+      console.log('📧 [APPOINTMENT_SERVICE] ===========================================');
+      
+      try {
+        const clientEmail = updatedAppointment.client?.email;
+        const clientName = updatedAppointment.client?.fullName || clientEmail?.split('@')[0] || 'Customer';
+        
+        if (!clientEmail) {
+          console.warn('⚠️ [APPOINTMENT_SERVICE] No client email found, skipping rejection email');
+          console.warn('⚠️ [APPOINTMENT_SERVICE] Client:', updatedAppointment.client);
+          return updatedAppointment;
+        }
+        
+        console.log('✅ [APPOINTMENT_SERVICE] Client email found:', clientEmail);
+        console.log('📧 [APPOINTMENT_SERVICE] Client name:', clientName);
+        
+        const bookingData = prepareBookingData();
+        const rejectionReason = updateStatusDto.notes || undefined;
+        
+        console.log('📧 [APPOINTMENT_SERVICE] Booking data:', JSON.stringify(bookingData, null, 2));
+        console.log('📧 [APPOINTMENT_SERVICE] Rejection reason:', rejectionReason || 'none');
+        console.log('📧 [APPOINTMENT_SERVICE] Calling sendBookingRejectedClientEmail...');
+        
+        const emailResult = await this.emailService.sendBookingRejectedClientEmail(
+          clientEmail,
+          clientName,
+          bookingData,
+          rejectionReason
+        );
+        
+        console.log('📧 [APPOINTMENT_SERVICE] Email result:', JSON.stringify(emailResult, null, 2));
+        
+        if (emailResult?.success) {
+          console.log('✅ [APPOINTMENT_SERVICE] ✅✅✅ Rejection email sent successfully ✅✅✅');
+          console.log('✅ [APPOINTMENT_SERVICE] Message ID:', emailResult.messageId || 'N/A');
+        } else {
+          console.error('❌ [APPOINTMENT_SERVICE] Failed to send rejection email');
+          console.error('❌ [APPOINTMENT_SERVICE] Error:', emailResult?.error);
+        }
+      } catch (error) {
+        console.error('❌ [APPOINTMENT_SERVICE] Exception while sending rejection email');
+        console.error('❌ [APPOINTMENT_SERVICE] Error:', error?.message);
+        console.error('❌ [APPOINTMENT_SERVICE] Stack:', error?.stack);
+      }
+    } else {
+      console.log('📧 [APPOINTMENT_SERVICE] Not sending rejection email (condition not met)');
+    }
+
+    console.log('📧 [APPOINTMENT_SERVICE] ===========================================');
+    console.log('📧 [APPOINTMENT_SERVICE] Email notification checks completed');
+    console.log('📧 [APPOINTMENT_SERVICE] ===========================================');
+
+    return updatedAppointment;
   }
 
   async getAppointmentsByVendorId(vendorId: string) {

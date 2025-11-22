@@ -206,6 +206,223 @@ export class AnalyticsService {
     }
   }
 
+  // ✅ NEW: Unified vendor dashboard data
+  async getVendorDashboard(vendorId: string) {
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      
+      const monthAgo = new Date();
+      monthAgo.setMonth(monthAgo.getMonth() - 1);
+
+      // Base where clause for service appointments - only count paid and completed appointments
+      // Note: paymentStatus can be 'processing' (after payment) or 'paid'/'completed'
+      // Also check order status - if order is 'confirmed' or 'paid', it's been paid
+      const baseWhere = {
+        vendorId: vendorId,
+        status: { notIn: ['cancelled', 'rejected'] },
+        order: {
+          AND: [
+            { status: { not: 'cancelled' } },
+            {
+              OR: [
+                // Payment status indicates payment (including 'processing' which means payment is in progress)
+                { paymentStatus: { in: ['paid', 'completed', 'processing'] } },
+                // Order status indicates payment was successful
+                { status: { in: ['paid', 'confirmed'] } },
+              ],
+            },
+          ],
+        },
+      };
+
+      // Get service appointments stats in parallel
+      const [
+        totalAppointments,
+        completedAppointments,
+        pendingAppointments,
+        totalRevenue,
+        todayRevenue,
+        weekRevenue,
+        monthRevenue,
+        totalServices,
+        activeServices,
+      ] = await Promise.all([
+        // Total appointments (paid and not cancelled)
+        this.prisma.serviceAppointment.count({
+          where: baseWhere,
+        }),
+        // Completed appointments
+        this.prisma.serviceAppointment.count({
+          where: {
+            ...baseWhere,
+            status: 'completed',
+          },
+        }),
+        // Pending appointments
+        this.prisma.serviceAppointment.count({
+          where: {
+            ...baseWhere,
+            status: 'pending',
+          },
+        }),
+        // Total revenue (sum of servicePrice from all paid appointments)
+        this.prisma.serviceAppointment.aggregate({
+          where: baseWhere,
+          _sum: { servicePrice: true },
+        }),
+        // Today's revenue
+        this.prisma.serviceAppointment.aggregate({
+          where: {
+            ...baseWhere,
+            createdAt: { gte: today },
+          },
+          _sum: { servicePrice: true },
+        }),
+        // This week's revenue
+        this.prisma.serviceAppointment.aggregate({
+          where: {
+            ...baseWhere,
+            createdAt: { gte: weekAgo },
+          },
+          _sum: { servicePrice: true },
+        }),
+        // This month's revenue
+        this.prisma.serviceAppointment.aggregate({
+          where: {
+            ...baseWhere,
+            createdAt: { gte: monthAgo },
+          },
+          _sum: { servicePrice: true },
+        }),
+        // Total services
+        this.prisma.service.count({
+          where: { vendorId: vendorId },
+        }),
+        // Active services
+        this.prisma.service.count({
+          where: { vendorId: vendorId, isActive: true },
+        }),
+      ]);
+
+      // Get unique customers count - use raw query for better performance
+      const uniqueCustomersResult = await this.prisma.$queryRaw<Array<{ clientId: string }>>`
+        SELECT DISTINCT o.client_id as "clientId"
+        FROM service_appointments sa
+        INNER JOIN orders o ON sa.order_id = o.id
+        WHERE sa.vendor_id = ${vendorId}
+          AND sa.status NOT IN ('cancelled', 'rejected')
+          AND (
+            o.payment_status IN ('paid', 'completed', 'processing')
+            OR o.status IN ('paid', 'confirmed', 'processing')
+          )
+          AND o.status != 'cancelled'
+          AND o.payment_status != 'failed'
+      `;
+
+      const customerIds = new Set(
+        uniqueCustomersResult.map((row) => row.clientId).filter(Boolean)
+      );
+
+      // Get new customers this week
+      const thisWeekCustomersResult = await this.prisma.$queryRaw<Array<{ clientId: string }>>`
+        SELECT DISTINCT o.client_id as "clientId"
+        FROM service_appointments sa
+        INNER JOIN orders o ON sa.order_id = o.id
+        WHERE sa.vendor_id = ${vendorId}
+          AND sa.status NOT IN ('cancelled', 'rejected')
+          AND (
+            o.payment_status IN ('paid', 'completed', 'processing')
+            OR o.status IN ('paid', 'confirmed', 'processing')
+          )
+          AND o.status != 'cancelled'
+          AND o.payment_status != 'failed'
+          AND sa.created_at >= ${weekAgo}
+      `;
+
+      const thisWeekCustomerIds = new Set(
+        thisWeekCustomersResult.map((row) => row.clientId).filter(Boolean)
+      );
+
+      // Calculate completion rate
+      const completionRate =
+        totalAppointments > 0
+          ? (completedAppointments / totalAppointments) * 100
+          : 0;
+
+      // Count appointments this month
+      const monthAppointments = await this.prisma.serviceAppointment.count({
+        where: {
+          ...baseWhere,
+          createdAt: { gte: monthAgo },
+        },
+      });
+
+      // Count appointments this week
+      const weekAppointments = await this.prisma.serviceAppointment.count({
+        where: {
+          ...baseWhere,
+          createdAt: { gte: weekAgo },
+        },
+      });
+
+      return {
+        // Core metrics
+        totalRevenue: Number(totalRevenue._sum.servicePrice || 0),
+        totalOrders: totalAppointments,
+        pendingOrders: pendingAppointments,
+        completedOrders: completedAppointments,
+        averageOrderValue:
+          totalAppointments > 0
+            ? Number(totalRevenue._sum.servicePrice || 0) / totalAppointments
+            : 0,
+
+        // Revenue by period
+        todayRevenue: Number(todayRevenue._sum.servicePrice || 0),
+        weekRevenue: Number(weekRevenue._sum.servicePrice || 0),
+        monthRevenue: Number(monthRevenue._sum.servicePrice || 0),
+
+        // Service metrics
+        totalServices: totalServices,
+        activeServices: activeServices,
+
+        // Customer metrics
+        totalCustomers: customerIds.size,
+        newCustomers: thisWeekCustomerIds.size,
+
+        // Performance metrics
+        monthServicesCompletedRate: completionRate,
+        monthServices: monthAppointments,
+        weekSales: weekAppointments,
+        monthSales: monthAppointments,
+      };
+    } catch (error) {
+      console.error('Error in getVendorDashboard:', error);
+      // Return minimal data if dashboard fails
+      return {
+        totalRevenue: 0,
+        totalOrders: 0,
+        pendingOrders: 0,
+        completedOrders: 0,
+        averageOrderValue: 0,
+        todayRevenue: 0,
+        weekRevenue: 0,
+        monthRevenue: 0,
+        totalServices: 0,
+        activeServices: 0,
+        totalCustomers: 0,
+        newCustomers: 0,
+        monthServicesCompletedRate: 0,
+        monthServices: 0,
+        weekSales: 0,
+        monthSales: 0,
+      };
+    }
+  }
+
   // ✅ NEW: Get top products for retailer (optimized)
   private async getTopProductsForRetailer(retailerId: string, limit: number = 5) {
     try {

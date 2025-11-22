@@ -166,8 +166,11 @@ export class ServicesService {
   }
 
   async getUserServices(userId: string) {
+    // Ensure we're filtering by the correct vendor ID
     const services = await this.prisma.service.findMany({
-      where: { vendorId: userId },
+      where: { 
+        vendorId: userId, // Only get services for this specific vendor
+      },
       include: {
         serviceCategory: {
           select: {
@@ -186,6 +189,12 @@ export class ServicesService {
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    // Log for debugging
+    console.log(`[ServicesService] getUserServices for userId: ${userId}, found ${services.length} services`);
+    if (services.length > 0) {
+      console.log(`[ServicesService] Sample service vendor IDs:`, services.slice(0, 3).map(s => s.vendorId));
+    }
 
     return services;
   }

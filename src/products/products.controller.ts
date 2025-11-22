@@ -84,18 +84,39 @@ export class ProductsController {
     return this.productsService.getProductsByCategory(categoryId);
   }
 
-  @Get('manufacturer/:manufacturerId')
-  async getProductsByManufacturer(
-    @Param('manufacturerId') manufacturerId: string,
-  ) {
-    return this.productsService.getProductsByManufacturer(manufacturerId);
-  }
-
   @Get('search')
   async searchProducts(
     @Query('q') query: string,
   ) {
     return this.productsService.searchProducts(query);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('manufacturer/restock/:retailerProductId')
+  async getManufacturerProductsForRestock(
+    @Param('retailerProductId') retailerProductId: string,
+  ) {
+    return this.productsService.getManufacturerProductsForRestock(retailerProductId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('manufacturer/available')
+  async getAllAvailableManufacturerProducts(
+    @Request() req,
+  ) {
+    console.log('🎯 [ProductsController] getAllAvailableManufacturerProducts called');
+    console.log('   User ID:', req.user?.sub);
+    console.log('   User Role:', req.user?.role);
+    const result = await this.productsService.getAllAvailableManufacturerProducts(req.user.sub);
+    console.log('   Result count:', Array.isArray(result) ? result.length : 'not an array');
+    return result;
+  }
+
+  @Get('manufacturer/:manufacturerId')
+  async getProductsByManufacturer(
+    @Param('manufacturerId') manufacturerId: string,
+  ) {
+    return this.productsService.getProductsByManufacturer(manufacturerId);
   }
 
   @UseGuards(JwtAuthGuard)

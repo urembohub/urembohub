@@ -185,3 +185,135 @@ export const getBookingReminderTemplate = (clientName: string, bookingData: any)
   };
 };
 
+export const getBookingCancelledClientTemplate = (clientName: string, bookingData: any, reason?: string) => {
+  const content = `
+    <div class="content-section">
+      <p class="text-body">Hi <strong>${clientName}</strong>,</p>
+      
+      <p class="text-body">We're sorry to inform you that your appointment has been cancelled.</p>
+      
+      <div class="highlight-box">
+        <span class="status-badge status-danger">Cancelled</span>
+        <h3 style="margin: 12px 0; color: hsl(var(--primary)); font-size: 18px; font-weight: 600;">Cancelled Appointment Details:</h3>
+        <table style="width: 100%; border-collapse: collapse; margin: 12px 0;">
+          <tr>
+            <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Service:</td>
+            <td style="padding: 8px 0; color: hsl(var(--muted-foreground));">${bookingData.serviceName}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Date:</td>
+            <td style="padding: 8px 0; color: hsl(var(--muted-foreground));">${new Date(bookingData.appointmentDate).toLocaleDateString()}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Time:</td>
+            <td style="padding: 8px 0; color: hsl(var(--muted-foreground));">${bookingData.startTime} - ${bookingData.endTime}</td>
+          </tr>
+          ${reason ? `
+          <tr>
+            <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Reason:</td>
+            <td style="padding: 8px 0; color: hsl(var(--muted-foreground));">${reason}</td>
+          </tr>
+          ` : ''}
+        </table>
+      </div>
+      
+      <div style="background: hsl(var(--accent)); padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <h4 style="margin: 0 0 12px 0; color: hsl(var(--primary)); font-size: 16px; font-weight: 600;">What happens next:</h4>
+        <ul style="margin: 0; padding-left: 20px; color: hsl(var(--foreground));">
+          <li style="margin-bottom: 6px;">If payment was made, you'll receive a full refund</li>
+          <li style="margin-bottom: 6px;">You can book a new appointment at any time</li>
+          <li style="margin-bottom: 6px;">Contact support if you have any questions</li>
+        </ul>
+      </div>
+      
+      <p class="text-body">We apologize for any inconvenience. If you'd like to reschedule or book a different service, please visit our website.</p>
+    </div>
+  `;
+
+  return {
+    subject: `Appointment Cancelled - ${bookingData.serviceName}`,
+    html: generateBaseEmailHTML({
+      title: `Appointment Cancelled ❌`,
+      preheader: `Your appointment has been cancelled.`,
+      content,
+      cta_button: {
+        text: 'Book New Appointment',
+        url: `https://urembohub.com/services`,
+        style: 'primary'
+      },
+      variables: {
+        company_name: 'Urembo Hub',
+        support_email: 'support@urembohub.com',
+        base_url: 'https://urembohub.com',
+        logo_url: `${process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000'}/uploads/assets/logo.png`
+      }
+    })
+  };
+};
+
+export const getBookingRejectedClientTemplate = (clientName: string, bookingData: any, reason?: string) => {
+  const content = `
+    <div class="content-section">
+      <p class="text-body">Hi <strong>${clientName}</strong>,</p>
+      
+      <p class="text-body">We're sorry to inform you that your appointment request has been rejected by the vendor.</p>
+      
+      <div class="highlight-box">
+        <span class="status-badge status-danger">Rejected</span>
+        <h3 style="margin: 12px 0; color: hsl(var(--primary)); font-size: 18px; font-weight: 600;">Rejected Appointment Details:</h3>
+        <table style="width: 100%; border-collapse: collapse; margin: 12px 0;">
+          <tr>
+            <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Service:</td>
+            <td style="padding: 8px 0; color: hsl(var(--muted-foreground));">${bookingData.serviceName}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Date:</td>
+            <td style="padding: 8px 0; color: hsl(var(--muted-foreground));">${new Date(bookingData.appointmentDate).toLocaleDateString()}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Time:</td>
+            <td style="padding: 8px 0; color: hsl(var(--muted-foreground));">${bookingData.startTime} - ${bookingData.endTime}</td>
+          </tr>
+          ${reason ? `
+          <tr>
+            <td style="padding: 8px 0; font-weight: 600; color: hsl(var(--foreground));">Reason:</td>
+            <td style="padding: 8px 0; color: hsl(var(--muted-foreground));">${reason}</td>
+          </tr>
+          ` : ''}
+        </table>
+      </div>
+      
+      <div style="background: hsl(var(--accent)); padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <h4 style="margin: 0 0 12px 0; color: hsl(var(--primary)); font-size: 16px; font-weight: 600;">What happens next:</h4>
+        <ul style="margin: 0; padding-left: 20px; color: hsl(var(--foreground));">
+          <li style="margin-bottom: 6px;">If payment was made, you'll receive a full refund</li>
+          <li style="margin-bottom: 6px;">You can book a new appointment with a different date/time</li>
+          <li style="margin-bottom: 6px;">Contact support if you have any questions</li>
+        </ul>
+      </div>
+      
+      <p class="text-body">We apologize for any inconvenience. If you'd like to try booking again or explore other services, please visit our website.</p>
+    </div>
+  `;
+
+  return {
+    subject: `Appointment Rejected - ${bookingData.serviceName}`,
+    html: generateBaseEmailHTML({
+      title: `Appointment Rejected ❌`,
+      preheader: `Your appointment request has been rejected.`,
+      content,
+      cta_button: {
+        text: 'Book New Appointment',
+        url: `https://urembohub.com/services`,
+        style: 'primary'
+      },
+      variables: {
+        company_name: 'Urembo Hub',
+        support_email: 'support@urembohub.com',
+        base_url: 'https://urembohub.com',
+        logo_url: `${process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000'}/uploads/assets/logo.png`
+      }
+    })
+  };
+};
+

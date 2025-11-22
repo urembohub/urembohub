@@ -449,6 +449,27 @@ export class OnboardingService {
       `📋 Backend: Found ${submissions.length} regular submissions for user ${userId}`
     )
 
+    // Debug: Log file submissions specifically
+    const fileSubmissions = submissions.filter(s => {
+      const req = s.requirement
+      return req?.fieldType === 'file'
+    })
+    if (fileSubmissions.length > 0) {
+      console.log(`📎 Backend: Found ${fileSubmissions.length} file submissions:`, 
+        fileSubmissions.map(s => ({
+          id: s.id,
+          requirementId: s.requirementId,
+          requirementLabel: s.requirement?.label,
+          fileUrl: s.fileUrl,
+          value: s.value,
+          hasFileUrl: !!s.fileUrl,
+          hasValue: !!s.value
+        }))
+      )
+    } else {
+      console.log(`⚠️ Backend: No file submissions found for user ${userId}`)
+    }
+
     // Get payment details from Profile table
     const profile = await this.prisma.profile.findUnique({
       where: { id: userId },

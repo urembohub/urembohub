@@ -1035,6 +1035,16 @@ export class PaymentsService {
         paymentData.customer?.customer_code
       )
 
+      // Check if this is a manufacturer order by looking up the reference in ManufacturerOrder table
+      const manufacturerOrder = await this.prisma.manufacturerOrder.findFirst({
+        where: { paystackReference: reference },
+      });
+      
+      if (manufacturerOrder) {
+        console.log("💳 [PAYMENT_CALLBACK] Manufacturer order detected, processing manufacturer order payment...");
+        return await this.handleManufacturerOrderPayment(reference, paymentData);
+      }
+
       // Find order by payment reference
       console.log(
         "💳 [PAYMENT_CALLBACK] Step 2: Finding order by payment reference..."
@@ -1181,7 +1191,7 @@ export class PaymentsService {
       console.log(
         "💳 [PAYMENT_CALLBACK] Step 7: Sending payment success notifications..."
       )
-      await this.sendPaymentSuccessNotifications(order.id, reference)
+      await this.sendPaymentSuccessNotifications(order.id, reference, paymentData)
       console.log("✅ [PAYMENT_CALLBACK] Payment success notifications sent")
 
       console.log(
@@ -1206,6 +1216,164 @@ export class PaymentsService {
         success: false,
         message: "Payment callback handling failed",
       }
+    }
+  }
+
+  /**
+   * Handle payment callback for manufacturer orders
+   */
+  private async handleManufacturerOrderPayment(reference: string, paymentData: any): Promise<{
+    success: boolean
+    orderId?: string
+    message?: string
+  }> {
+    try {
+      console.log("💳 [MANUFACTURER_ORDER_PAYMENT] Processing manufacturer order payment...");
+      
+      // Get manufacturer order by payment reference
+      const manufacturerOrder = await this.prisma.manufacturerOrder.findFirst({
+        where: { paystackReference: reference },
+        include: {
+          manufacturer: {
+            select: {
+              id: true,
+              email: true,
+              fullName: true,
+              businessName: true,
+              deliveryDetails: true,
+              pickupMtaaniBusinessDetails: true,
+            },
+          },
+          retailer: {
+            select: {
+              id: true,
+              email: true,
+              fullName: true,
+              businessName: true,
+              phone: true,
+              deliveryDetails: true,
+            },
+          },
+          product: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      });
+
+      if (!manufacturerOrder) {
+        throw new Error(`Manufacturer order not found for reference: ${reference}`);
+      }
+
+      const orderId = manufacturerOrder.id;
+
+      // Update order payment status
+      await this.prisma.manufacturerOrder.update({
+        where: { id: orderId },
+        data: {
+          paymentStatus: 'paid',
+          paidAt: new Date(),
+          status: 'confirmed',
+        },
+      });
+
+      console.log("✅ [MANUFACTURER_ORDER_PAYMENT] Order payment status updated");
+
+      // Create shipping package using the injected PickupMtaaniService
+      
+      // Get manufacturer and retailer delivery details
+      const manufacturerDelivery = typeof manufacturerOrder.manufacturer.deliveryDetails === 'string'
+        ? JSON.parse(manufacturerOrder.manufacturer.deliveryDetails)
+        : manufacturerOrder.manufacturer.deliveryDetails;
+
+      const retailerDelivery = typeof manufacturerOrder.retailer.deliveryDetails === 'string'
+        ? JSON.parse(manufacturerOrder.retailer.deliveryDetails)
+        : manufacturerOrder.retailer.deliveryDetails;
+
+      const deliveryMode = retailerDelivery.deliveryMode || 'agent';
+      const senderAgentId = Number(manufacturerDelivery.agentId || manufacturerDelivery.deliveryDetails?.agentId);
+      const receiverAgentId = deliveryMode === 'agent'
+        ? Number(retailerDelivery.agentId || retailerDelivery.deliveryDetails?.agentId)
+        : undefined;
+      const doorstepDestinationId = deliveryMode === 'door'
+        ? Number(retailerDelivery.doorstepDestinationId)
+        : undefined;
+
+      const businessDetails = manufacturerOrder.manufacturer.pickupMtaaniBusinessDetails as any;
+      const businessId = businessDetails?.businessId || businessDetails?.id;
+
+      if (!businessId) {
+        console.warn("⚠️ [MANUFACTURER_ORDER_PAYMENT] Manufacturer business ID not configured, skipping package creation");
+        return {
+          success: true,
+          orderId: orderId,
+          message: "Payment processed, but shipping package creation skipped (business ID not configured)",
+        };
+      }
+
+      // Create package
+      const packageData: any = {
+        senderAgentId,
+        receiverAgentId,
+        packageValue: Number(manufacturerOrder.totalAmount),
+        customerName: manufacturerOrder.retailer.businessName || manufacturerOrder.retailer.fullName || 'Retailer',
+        packageName: `${manufacturerOrder.product.name} (${manufacturerOrder.quantity} units)`,
+        customerPhoneNumber: manufacturerOrder.retailer.phone || '',
+        paymentOption: 'vendor',
+        on_delivery_balance: 0,
+      };
+
+      if (deliveryMode === 'door') {
+        packageData.doorstepDestinationId = doorstepDestinationId;
+        packageData.lat = retailerDelivery.lat;
+        packageData.lng = retailerDelivery.lng;
+        packageData.locationDescription = retailerDelivery.locationDescription || retailerDelivery.address;
+        packageData.paymentOption = retailerDelivery.paymentOption || 'vendor';
+        if (packageData.paymentOption === 'customer') {
+          packageData.payment_number = retailerDelivery.paymentNumber;
+        }
+      }
+
+      const packageResult = await this.pickupMtaaniService.createPackage(packageData, String(businessId));
+
+      // Update order with shipping information
+      const shippingAddress = {
+        ...(manufacturerOrder.shippingAddress as any || {}),
+        packageId: packageResult.data.id,
+        receiptNo: packageResult.data.receipt_no,
+        trackingId: packageResult.data.trackId,
+        trackingLink: packageResult.data.trackingLink,
+        deliveryFee: packageResult.data.delivery_fee,
+        state: packageResult.data.state,
+        createdAt: packageResult.data.createdAt,
+        senderAgentId: packageResult.data.senderAgentID_id,
+        receiverAgentId: packageResult.data.receieverAgentID_id,
+        deliveryMode,
+      };
+
+      await this.prisma.manufacturerOrder.update({
+        where: { id: orderId },
+        data: {
+          shippingAddress: shippingAddress as any,
+          trackingNumber: packageResult.data.trackId || packageResult.data.receipt_no,
+        },
+      });
+
+      console.log("✅ [MANUFACTURER_ORDER_PAYMENT] Shipping package created");
+
+      return {
+        success: true,
+        orderId: orderId,
+        message: "Manufacturer order payment processed and shipping package created",
+      };
+    } catch (error) {
+      console.error("❌ [MANUFACTURER_ORDER_PAYMENT] Error processing manufacturer order payment:", error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to process manufacturer order payment",
+      };
     }
   }
 
@@ -1287,18 +1455,35 @@ export class PaymentsService {
    */
   private async sendPaymentSuccessNotifications(
     orderId: string,
-    paymentReference: string
+    paymentReference: string,
+    paymentData?: any
   ) {
     try {
       console.log(
-        "💰 [PAYMENT] Starting payment success notifications for order:",
-        orderId
+        "💰 [PAYMENT] ==========================================="
       )
+      console.log(
+        "💰 [PAYMENT] Starting payment success notifications"
+      )
+      console.log(
+        "💰 [PAYMENT] ==========================================="
+      )
+      console.log("💰 [PAYMENT] Order ID:", orderId)
+      console.log("💰 [PAYMENT] Payment Reference:", paymentReference)
+      console.log("💰 [PAYMENT] Timestamp:", new Date().toISOString())
 
-      // Get order details with partners
+      // Get order details with partners and user
+      console.log("💰 [PAYMENT] Step 1: Fetching order from database...")
       const order = await this.prisma.order.findUnique({
         where: { id: orderId },
         include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              fullName: true,
+            },
+          },
           orderItems: {
             include: {
               product: {
@@ -1338,8 +1523,25 @@ export class PaymentsService {
 
       if (!order) {
         console.error("❌ [PAYMENT] Order not found for payment notifications")
+        console.error("❌ [PAYMENT] Order ID searched:", orderId)
         return
       }
+
+      console.log("✅ [PAYMENT] Order found successfully")
+      console.log("💰 [PAYMENT] Order Details:")
+      console.log("💰 [PAYMENT]   - Order ID:", order.id)
+      console.log("💰 [PAYMENT]   - Order Status:", order.status)
+      console.log("💰 [PAYMENT]   - Order Total:", order.totalAmount)
+      console.log("💰 [PAYMENT]   - Order Currency:", order.currency)
+      console.log("💰 [PAYMENT]   - Order CustomerEmail:", order.customerEmail)
+      console.log("💰 [PAYMENT]   - Order UserId:", order.userId)
+      console.log("💰 [PAYMENT]   - Order User:", order.user ? {
+        id: order.user.id,
+        email: order.user.email,
+        fullName: order.user.fullName
+      } : "null")
+      console.log("💰 [PAYMENT]   - Order Items Count:", order.orderItems?.length || 0)
+      console.log("💰 [PAYMENT]   - Service Appointments Count:", order.serviceAppointments?.length || 0)
 
       // Collect unique partners
       const partners = new Map<string, any>()
@@ -1363,13 +1565,93 @@ export class PaymentsService {
 
       console.log("💰 [PAYMENT] Found partners to notify:", partners.size)
 
+      // Send email to client about order placement (awaiting approval)
+      console.log("💰 [PAYMENT] ===========================================")
+      console.log("💰 [PAYMENT] Step 2: Preparing client email...")
+      console.log("💰 [PAYMENT] ===========================================")
+      try {
+        // Get customer email from payment data (most reliable - this is who actually paid)
+        // Fallback to order.user.email, then order.customerEmail
+        const paymentCustomerEmail = paymentData?.customer?.email;
+        console.log("💰 [PAYMENT] Checking customer email sources...")
+        console.log("💰 [PAYMENT]   - paymentData.customer?.email:", paymentCustomerEmail || "undefined")
+        console.log("💰 [PAYMENT]   - order.user?.email:", order.user?.email || "undefined")
+        console.log("💰 [PAYMENT]   - order.customerEmail:", order.customerEmail || "undefined")
+        
+        // Priority: Payment customer email > Order user email > Order customerEmail
+        // Payment customer email is most reliable as it's who actually made the payment
+        const customerEmail = paymentCustomerEmail || order.user?.email || order.customerEmail;
+        
+        if (customerEmail) {
+          console.log("✅ [PAYMENT] Customer email found:", customerEmail)
+          
+          const customerName = order.user?.fullName || customerEmail.split('@')[0] || 'Customer';
+          console.log("💰 [PAYMENT] Customer name:", customerName)
+          
+          const orderItems = order.orderItems?.map(item => item.title) || [];
+          const serviceItems = order.serviceAppointments?.map(apt => apt.service?.name || 'Service') || [];
+          const allItems = [...orderItems, ...serviceItems];
+          
+          const orderDataForClient = {
+            orderId: order.id,
+            totalAmount: order.totalAmount,
+            currency: order.currency || 'KES',
+            items: allItems
+          };
+          
+          console.log('📧 [PAYMENT] Email data prepared:')
+          console.log('📧 [PAYMENT]   - Customer Email:', customerEmail)
+          console.log('📧 [PAYMENT]   - Customer Name:', customerName)
+          console.log('📧 [PAYMENT]   - Order ID:', order.id)
+          console.log('📧 [PAYMENT]   - Total Amount:', orderDataForClient.totalAmount)
+          console.log('📧 [PAYMENT]   - Currency:', orderDataForClient.currency)
+          console.log('📧 [PAYMENT]   - Items Count:', orderDataForClient.items.length)
+          console.log('📧 [PAYMENT]   - Items:', orderDataForClient.items)
+          
+          console.log('📧 [PAYMENT] Calling email service...')
+          const emailResult = await this.emailService.sendOrderCreatedAfterPaymentEmail(
+            customerEmail,
+            customerName,
+            order.id,
+            orderDataForClient
+          );
+          
+          console.log('📧 [PAYMENT] Email service returned:', JSON.stringify(emailResult, null, 2))
+          
+          if (emailResult?.success) {
+            console.log(`✅ [PAYMENT] ✅✅✅ Client order placed email sent successfully to ${customerEmail} ✅✅✅`);
+            console.log(`✅ [PAYMENT] Message ID: ${emailResult.messageId || 'N/A'}`);
+          } else {
+            console.error(`❌ [PAYMENT] ❌❌❌ Failed to send client order placed email ❌❌❌`);
+            console.error(`❌ [PAYMENT] Error:`, emailResult?.error);
+            console.error(`❌ [PAYMENT] Full result:`, JSON.stringify(emailResult, null, 2));
+          }
+        } else {
+          console.warn('⚠️ [PAYMENT] ⚠️⚠️⚠️ No customer email found for order ⚠️⚠️⚠️');
+          console.warn('⚠️ [PAYMENT] Order ID:', orderId);
+          console.warn('⚠️ [PAYMENT] Order.user:', order.user);
+          console.warn('⚠️ [PAYMENT] Order.customerEmail:', order.customerEmail);
+        }
+      } catch (error) {
+        console.error('❌ [PAYMENT] ❌❌❌ Exception caught while sending client email ❌❌❌');
+        console.error('❌ [PAYMENT] Error type:', error?.constructor?.name);
+        console.error('❌ [PAYMENT] Error message:', error?.message);
+        console.error('❌ [PAYMENT] Error stack:', error?.stack);
+        console.error('❌ [PAYMENT] Full error:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+        // Don't fail payment processing if email fails
+      }
+
       // Send notifications to each partner
       for (const [partnerId, partner] of partners) {
         try {
           const paymentData = {
+            paymentId: paymentReference || order.paystackReference || 'N/A',
+            orderId: orderId,
+            amount: order.totalAmount?.toString() || '0',
+            currency: order.currency || 'KES',
+            method: order.paymentMethod || 'Paystack',
             payment_id: paymentReference,
             order_id: orderId,
-            amount: order.totalAmount.toString(),
             status: "successful",
             date: new Date().toLocaleDateString(),
           }
