@@ -185,6 +185,33 @@ export class ManufacturerOrdersController {
     return this.manufacturerOrdersService.initializePayment(id);
   }
 
+  // Calculate shipping BEFORE order creation
+  @Post('shipping/calculate')
+  @UseGuards(JwtAuthGuard)
+  async calculateShippingBeforeOrder(
+    @Body() body: { manufacturerId: string; packageValue: number },
+    @Request() req
+  ) {
+    console.log('📦 [CONTROLLER] Calculate shipping before order creation called');
+    console.log('📦 [CONTROLLER] Body:', body);
+    console.log('📦 [CONTROLLER] User role:', req.user.role);
+    console.log('📦 [CONTROLLER] Retailer ID:', req.user.sub);
+    
+    // Verify user is a retailer
+    if (req.user.role !== 'retailer' && req.user.role !== 'admin') {
+      throw new ForbiddenException('Only retailers can calculate shipping');
+    }
+    
+    const result = await this.manufacturerOrdersService.calculateShippingBeforeOrder(
+      body.manufacturerId,
+      req.user.sub, // retailerId
+      body.packageValue
+    );
+    
+    console.log('📦 [CONTROLLER] Shipping calculation result:', result);
+    return result;
+  }
+
   // Calculate shipping for manufacturer order
   @Post(':id/shipping/calculate')
   @UseGuards(JwtAuthGuard)

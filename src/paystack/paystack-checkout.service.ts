@@ -31,6 +31,26 @@ export class PaystackCheckoutService {
   }
 
   /**
+   * Get the backend URL for callbacks/webhooks
+   * Uses localhost in development, configured URL in production
+   */
+  private getBackendUrl(): string {
+    const isDevelopment = this.configService.get<string>('NODE_ENV') === 'development';
+    const envBackendUrl = this.configService.get<string>('BACKEND_URL');
+    
+    // In development, always use localhost even if BACKEND_URL is set to staging
+    if (isDevelopment) {
+      if (envBackendUrl && envBackendUrl.includes('staging.urembohub.com')) {
+        return 'http://localhost:3000';
+      }
+      return envBackendUrl || 'http://localhost:3000';
+    }
+    
+    // In production/staging, use the configured URL
+    return envBackendUrl || 'https://api.urembohub.com';
+  }
+
+  /**
    * Initialize Paystack payment
    * Now uses Payment Groups by default for multi-vendor orders
    */
@@ -175,7 +195,7 @@ export class PaystackCheckoutService {
         amount: Math.round(createPaymentDto.amount * 100), // Convert to kobo
         currency: 'KES',
         reference: `WKS_${Date.now()}_${order.id}`,
-        callback_url: `${this.configService.get('BACKEND_URL') || 'http://localhost:3000'}/api/paystack/checkout/webhook`,
+        callback_url: `${this.getBackendUrl()}/api/paystack/checkout/webhook`,
         metadata: {
           orderId: order.id,
           customerName: createPaymentDto.customerName || order.user?.fullName || order.customerEmail || 'Customer',
@@ -520,7 +540,7 @@ export class PaystackCheckoutService {
         amount: Math.round(createPaymentDto.amount * 100), // Convert to kobo
         currency: 'KES',
         reference: `WKS_${Date.now()}_${order.id}`,
-        callback_url: `${this.configService.get('BACKEND_URL') || 'http://localhost:3000'}/api/paystack/checkout/webhook`,
+        callback_url: `${this.getBackendUrl()}/api/paystack/checkout/webhook`,
         metadata: {
           orderId: order.id,
           customerName: createPaymentDto.customerName || order.user?.fullName || order.customerEmail || 'Customer',
@@ -932,9 +952,14 @@ export class PaystackCheckoutService {
       console.log('💳 [MANUFACTURER_ORDER_PAYMENT]   - Currency:', manufacturerOrder.currency);
 
       // Initialize Paystack payment directly (no commission splitting for manufacturer orders)
+      // Paystack expects amount in kobo (smallest currency unit)
+      // If amount is provided in DTO, use it (should already be in kobo)
+      // Otherwise, convert totalAmount from KES to kobo (multiply by 100)
+      const amountInKobo = createPaymentDto.amount || Math.round(Number(manufacturerOrder.totalAmount) * 100);
+      
       const paymentData = {
         email: createPaymentDto.customerEmail || manufacturerOrder.retailer.email,
-        amount: createPaymentDto.amount || Number(manufacturerOrder.totalAmount),
+        amount: amountInKobo,
         currency: createPaymentDto.currency || manufacturerOrder.currency || 'KES',
         reference: createPaymentDto.reference || `MFG-${manufacturerOrder.id}-${Date.now()}`,
         metadata: {
@@ -945,6 +970,11 @@ export class PaystackCheckoutService {
           manufacturerId: manufacturerOrder.manufacturer.id,
         },
       };
+      
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Payment data prepared:');
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT]   - Total Amount (KES):', Number(manufacturerOrder.totalAmount));
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT]   - Shipping Cost (KES):', Number(manufacturerOrder.shippingCost || 0));
+      console.log('💳 [MANUFACTURER_ORDER_PAYMENT]   - Amount (kobo):', amountInKobo);
 
       console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Initializing Paystack transaction...');
 

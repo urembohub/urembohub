@@ -200,6 +200,13 @@ export class ManufacturerOrdersService {
     const taxAmount = (taxableAmount * tax) / 100;
     const totalAmount = taxableAmount + taxAmount + shippingCost;
 
+    console.log('📦 [CREATE_ORDER] Order creation details:');
+    console.log('📦 [CREATE_ORDER]   - Subtotal:', subtotal);
+    console.log('📦 [CREATE_ORDER]   - Discount:', discountAmount);
+    console.log('📦 [CREATE_ORDER]   - Tax:', taxAmount);
+    console.log('📦 [CREATE_ORDER]   - Shipping Cost:', shippingCost);
+    console.log('📦 [CREATE_ORDER]   - Total Amount:', totalAmount);
+
     const order = await this.prisma.manufacturerOrder.create({
       data: {
         retailerId,
@@ -294,15 +301,22 @@ export class ManufacturerOrdersService {
     // Recalculate totals if pricing changed
     if (updateOrderDto.unitPrice || updateOrderDto.discount !== undefined || updateOrderDto.tax !== undefined || updateOrderDto.shippingCost !== undefined) {
       const newUnitPrice = updateOrderDto.unitPrice || order.unitPrice;
-      const newDiscount = updateOrderDto.discount !== undefined ? updateOrderDto.discount : order.discount;
-      const newTax = updateOrderDto.tax !== undefined ? updateOrderDto.tax : order.tax;
-      const newShippingCost = updateOrderDto.shippingCost !== undefined ? updateOrderDto.shippingCost : order.shippingCost;
+      const newDiscount = updateOrderDto.discount !== undefined ? updateOrderDto.discount : (order.discount || 0);
+      const newTax = updateOrderDto.tax !== undefined ? updateOrderDto.tax : (order.tax || 0);
+      const newShippingCost = updateOrderDto.shippingCost !== undefined ? updateOrderDto.shippingCost : (order.shippingCost || 0);
       
       const subtotal = Number(newUnitPrice) * order.quantity;
       const discountAmount = (subtotal * Number(newDiscount)) / 100;
       const taxableAmount = subtotal - discountAmount;
       const taxAmount = (taxableAmount * Number(newTax)) / 100;
       const totalAmount = taxableAmount + taxAmount + Number(newShippingCost);
+
+      console.log('📦 [UPDATE_ORDER] Recalculating totals:');
+      console.log('📦 [UPDATE_ORDER]   - Subtotal:', subtotal);
+      console.log('📦 [UPDATE_ORDER]   - Discount:', discountAmount);
+      console.log('📦 [UPDATE_ORDER]   - Tax:', taxAmount);
+      console.log('📦 [UPDATE_ORDER]   - Shipping Cost:', newShippingCost);
+      console.log('📦 [UPDATE_ORDER]   - Total Amount:', totalAmount);
 
       allowedUpdates.subtotal = subtotal;
       allowedUpdates.discountAmount = discountAmount;
@@ -351,6 +365,8 @@ export class ManufacturerOrdersService {
   }
 
   // Cancel manufacturer order
+  // Note: If order was already paid, stock was already reduced. 
+  // We should restore stock if cancelling a paid order.
   async cancelOrder(id: string, userId: string, userRole: string, reason?: string) {
     const order = await this.getOrderById(id);
 
@@ -362,6 +378,39 @@ export class ManufacturerOrdersService {
     // Check if order can be cancelled
     if (['shipped', 'delivered', 'cancelled'].includes(order.status)) {
       throw new BadRequestException('Order cannot be cancelled in current status');
+    }
+
+    // If order was paid, restore stock quantity
+    const wasPaid = order.paymentStatus === 'paid';
+    if (wasPaid) {
+      try {
+        const product = await this.prisma.product.findUnique({
+          where: { id: order.productId },
+          select: {
+            id: true,
+            stockQuantity: true,
+            name: true,
+          },
+        });
+
+        if (product) {
+          const currentStock = Number(product.stockQuantity);
+          const orderedQuantity = order.quantity;
+          const restoredStock = currentStock + orderedQuantity;
+
+          await this.prisma.product.update({
+            where: { id: product.id },
+            data: {
+              stockQuantity: restoredStock,
+            },
+          });
+
+          console.log(`✅ [CANCEL_ORDER] Stock restored for product ${product.name}: ${currentStock} → ${restoredStock} (restored: ${orderedQuantity})`);
+        }
+      } catch (stockError) {
+        console.error("❌ [CANCEL_ORDER] Error restoring product stock:", stockError);
+        // Don't fail the cancellation if stock restore fails, but log it
+      }
     }
 
     const updatedOrder = await this.prisma.manufacturerOrder.update({
@@ -625,16 +674,24 @@ export class ManufacturerOrdersService {
       throw new BadRequestException('Retailer email not found');
     }
 
+    // Fetch the latest order data to ensure we have the updated totalAmount (including shipping)
+    const latestOrder = await this.getOrderById(orderId);
+    
     // Create payment DTO for Paystack
+    // Paystack expects amount in kobo (smallest currency unit), so multiply by 100
+    const totalAmountInKobo = Math.round(Number(latestOrder.totalAmount) * 100);
+    
     const paymentDto = {
       orderId: `manufacturer-order-${orderId}`,
       customerEmail: retailer.email,
-      amount: Number(order.totalAmount),
-      currency: order.currency || 'KES',
+      amount: totalAmountInKobo,
+      currency: latestOrder.currency || 'KES',
     };
 
     console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Initializing payment for order:', orderId);
-    console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Amount:', paymentDto.amount);
+    console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Total Amount (KES):', Number(latestOrder.totalAmount));
+    console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Shipping Cost (KES):', Number(latestOrder.shippingCost || 0));
+    console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Amount (kobo):', paymentDto.amount);
     console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Currency:', paymentDto.currency);
 
     // Initialize payment via Paystack
@@ -671,13 +728,19 @@ export class ManufacturerOrdersService {
     };
   }
 
-  // Calculate shipping cost for manufacturer order
-  async calculateShipping(orderId: string) {
-    const order = await this.getOrderById(orderId);
-
+  // Calculate shipping cost BEFORE order creation (using product price and quantity)
+  async calculateShippingBeforeOrder(
+    manufacturerId: string,
+    retailerId: string,
+    packageValue: number
+  ) {
+    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] calculateShippingBeforeOrder called');
+    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Manufacturer ID:', manufacturerId);
+    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Retailer ID:', retailerId);
+    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Package value:', packageValue);
     // Get manufacturer delivery details (sender)
     const manufacturer = await this.prisma.profile.findUnique({
-      where: { id: order.manufacturerId },
+      where: { id: manufacturerId },
       select: {
         id: true,
         deliveryDetails: true,
@@ -691,7 +754,7 @@ export class ManufacturerOrdersService {
 
     // Get retailer delivery details (receiver)
     const retailer = await this.prisma.profile.findUnique({
-      where: { id: order.retailerId },
+      where: { id: retailerId },
       select: {
         id: true,
         deliveryDetails: true,
@@ -732,35 +795,56 @@ export class ManufacturerOrdersService {
       throw new BadRequestException('Retailer doorstep destination ID not found');
     }
 
-    // Get business ID from manufacturer
-    const businessDetails = manufacturer.pickupMtaaniBusinessDetails as any;
-    const businessId = businessDetails?.businessId || businessDetails?.id;
-
-    if (!businessId) {
-      throw new BadRequestException('Manufacturer Pick Up Mtaani business ID not configured');
+    // Calculate shipping using Pick Up Mtaani API
+    let shippingCost = 0;
+    try {
+      if (deliveryMode === 'door') {
+        shippingCost = await this.pickupMtaaniService.getDoorstepDeliveryCharge(
+          senderAgentId,
+          doorstepDestinationId
+        );
+      } else {
+        shippingCost = await this.pickupMtaaniService.getDeliveryCharge(
+          senderAgentId,
+          receiverAgentId
+        );
+      }
+    } catch (error) {
+      console.error('📦 [MANUFACTURER_ORDER_SHIPPING] Error calculating shipping:', error);
+      // Fallback to 5% estimate if API call fails
+      shippingCost = packageValue * 0.05;
     }
 
-    // Create a test package to calculate shipping
-    // Note: Pick Up Mtaani API doesn't have a direct shipping calculator endpoint
-    // We'll use a minimal package creation or estimate based on package value
-    const packageValue = Number(order.totalAmount);
-    
-    // For now, return a default shipping cost calculation
-    // In production, you might want to call Pick Up Mtaani API or use their pricing table
-    const estimatedShipping = packageValue * 0.05; // 5% of order value as estimate
-
-    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Calculated shipping for order:', orderId);
+    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Calculated shipping BEFORE order creation:');
     console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Package value:', packageValue);
-    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Estimated shipping:', estimatedShipping);
+    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Shipping cost:', shippingCost);
+    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Delivery mode:', deliveryMode);
 
     return {
-      shippingCost: estimatedShipping,
-      currency: order.currency || 'KES',
+      shippingCost,
+      currency: 'KES',
       senderAgentId,
       receiverAgentId,
       doorstepDestinationId,
       deliveryMode,
     };
+  }
+
+  // Calculate shipping cost for manufacturer order (after order creation)
+  async calculateShipping(orderId: string) {
+    const order = await this.getOrderById(orderId);
+
+    // Use the pre-order calculation method
+    const result = await this.calculateShippingBeforeOrder(
+      order.manufacturerId,
+      order.retailerId,
+      Number(order.totalAmount)
+    );
+
+    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Calculated shipping for order:', orderId);
+    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Shipping cost:', result.shippingCost);
+
+    return result;
   }
 
   // Create shipping package for manufacturer order

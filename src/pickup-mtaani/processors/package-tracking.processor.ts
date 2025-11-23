@@ -73,14 +73,28 @@ export class PackageTrackingProcessor {
       // Debug: Log the full package data to see what we're getting
       this.logger.log(`🔍 [PACKAGE_TRACKING] Full package data:`, JSON.stringify(packageData, null, 2));
 
-      // Update order with package status information and full response
-      await this.updateOrderPackageStatus(orderId, {
-        packageStatus: currentState,
-        paymentStatus: paymentStatus,
-        packageTrackingId: trackingId,
-        packageReceiptNo: receiptNo,
-        packageTrackingLink: this.normalizeTrackingLink(trackingLink),
-      }, packageStatusResponse.data); // Pass full response for history
+      // Check if this is a manufacturer order
+      const isManufacturerOrder = job.data.isManufacturerOrder === true;
+
+      if (isManufacturerOrder) {
+        // Update manufacturer order with package status information
+        await this.updateManufacturerOrderPackageStatus(orderId, {
+          packageStatus: currentState,
+          paymentStatus: paymentStatus,
+          packageTrackingId: trackingId,
+          packageReceiptNo: receiptNo,
+          packageTrackingLink: this.normalizeTrackingLink(trackingLink),
+        }, packageStatusResponse.data); // Pass full response for history
+      } else {
+        // Update regular order with package status information
+        await this.updateOrderPackageStatus(orderId, {
+          packageStatus: currentState,
+          paymentStatus: paymentStatus,
+          packageTrackingId: trackingId,
+          packageReceiptNo: receiptNo,
+          packageTrackingLink: this.normalizeTrackingLink(trackingLink),
+        }, packageStatusResponse.data); // Pass full response for history
+      }
 
       // Check if package is in a final state
       const finalStates = ['delivered', 'cancelled', 'returned'];
@@ -293,6 +307,110 @@ export class PackageTrackingProcessor {
   }
 
   /**
+   * Update manufacturer order with package status information
+   */
+  private async updateManufacturerOrderPackageStatus(
+    manufacturerOrderId: string,
+    packageData: any,
+    fullPackageResponse: any
+  ) {
+    try {
+      const manufacturerOrder = await this.prisma.manufacturerOrder.findUnique({
+        where: { id: manufacturerOrderId },
+        select: {
+          id: true,
+          shippingAddress: true,
+          status: true,
+          trackingNumber: true,
+        },
+      });
+
+      if (!manufacturerOrder) {
+        throw new Error(`Manufacturer order ${manufacturerOrderId} not found`);
+      }
+
+      const shippingAddress = (manufacturerOrder.shippingAddress as any) || {};
+      const packageId = fullPackageResponse.id;
+
+      // Update shippingAddress with fresh data from Pick Up Mtaani
+      const updatedShippingAddress = {
+        ...shippingAddress,
+        packageId: packageId,
+        state: packageData.packageStatus,
+        status: packageData.packageStatus,
+        paymentStatus: packageData.paymentStatus || shippingAddress.paymentStatus,
+        trackingLink: packageData.packageTrackingLink || shippingAddress.trackingLink,
+        trackingId: packageData.packageTrackingId || shippingAddress.trackingId,
+        receiptNo: packageData.packageReceiptNo || shippingAddress.receiptNo,
+        deliveryFee: fullPackageResponse.delivery_fee || shippingAddress.deliveryFee,
+        senderAgentId: fullPackageResponse.senderAgentID_id || fullPackageResponse.agent_id || shippingAddress.senderAgentId,
+        receiverAgentId: fullPackageResponse.receieverAgentID_id || shippingAddress.receiverAgentId,
+        updatedAt: new Date().toISOString(),
+        lastUpdatedFromApi: new Date().toISOString(),
+      };
+
+      // Map Pick Up Mtaani state to manufacturer order status
+      const newOrderStatus = this.mapPickupMtaaniStateToManufacturerOrderStatus(
+        packageData.packageStatus,
+        packageData.paymentStatus
+      );
+
+      // Update manufacturer order
+      await this.prisma.manufacturerOrder.update({
+        where: { id: manufacturerOrderId },
+        data: {
+          shippingAddress: updatedShippingAddress as any,
+          trackingNumber: packageData.packageTrackingId || packageData.packageReceiptNo || manufacturerOrder.trackingNumber,
+          status: newOrderStatus || manufacturerOrder.status,
+        },
+      });
+
+      this.logger.log(
+        `✅ [PACKAGE_TRACKING] Updated manufacturer order ${manufacturerOrderId} package ${packageId} - State: ${packageData.packageStatus}, Payment: ${packageData.paymentStatus}`
+      );
+    } catch (error) {
+      this.logger.error(
+        `❌ [PACKAGE_TRACKING] Failed to update manufacturer order ${manufacturerOrderId}:`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Map Pick Up Mtaani state to manufacturer order status
+   */
+  private mapPickupMtaaniStateToManufacturerOrderStatus(
+    state: string,
+    paymentStatus?: string
+  ): string | null {
+    const normalizedState = state.toLowerCase().trim();
+
+    // Map based on Pick Up Mtaani state
+    switch (normalizedState) {
+      case 'request':
+      case 'pending':
+        return 'confirmed' // Order is confirmed but package not yet picked up
+      case 'paid':
+        return 'confirmed' // Payment confirmed
+      case 'picked_up':
+      case 'in_transit':
+      case 'in transit':
+        return 'shipped' // Package is in transit
+      case 'out_for_delivery':
+        return 'shipped' // Out for delivery
+      case 'delivered':
+        return 'delivered' // Package delivered
+      case 'cancelled':
+        return 'cancelled' // Package cancelled
+      case 'returned':
+        return 'cancelled' // Package returned (treat as cancelled for now)
+      default:
+        return null // Don't update status if state is unknown
+    }
+  }
+
+  /**
    * Handle tracking failure after all retries exhausted
    */
   private async handleTrackingFailure(
@@ -303,13 +421,28 @@ export class PackageTrackingProcessor {
     errorMessage: string
   ) {
     try {
-      // Update order with failure status
-      await this.prisma.order.update({
+      // Check if this is a manufacturer order by trying to find it
+      const manufacturerOrder = await this.prisma.manufacturerOrder.findUnique({
         where: { id: orderId },
-        data: {
-          packageStatus: 'tracking_failed',
-        },
       });
+
+      if (manufacturerOrder) {
+        // Update manufacturer order with failure status
+        await this.prisma.manufacturerOrder.update({
+          where: { id: orderId },
+          data: {
+            status: 'cancelled', // Treat tracking failure as cancelled for manufacturer orders
+          },
+        });
+      } else {
+        // Update regular order with failure status
+        await this.prisma.order.update({
+          where: { id: orderId },
+          data: {
+            packageStatus: 'tracking_failed',
+          },
+        });
+      }
 
       // Send failure notification to admin
       await this.emailService.sendPackageTrackingFailedEmail(

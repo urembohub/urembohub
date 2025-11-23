@@ -2,6 +2,8 @@ import { Injectable, NotFoundException, BadRequestException, ForbiddenException 
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateReviewDto } from './dto/create-review.dto';
 import { UpdateReviewDto } from './dto/update-review.dto';
+import { CreateProductReviewDto } from './dto/create-product-review.dto';
+import { CreateUserReviewDto } from './dto/create-user-review.dto';
 
 @Injectable()
 export class ReviewsService {
@@ -616,5 +618,574 @@ export class ReviewsService {
         },
       },
     });
+  }
+
+  // ========== PRODUCT REVIEWS ==========
+
+  /**
+   * Verify if user has purchased the product
+   */
+  private async verifyProductPurchase(userId: string, productId: string): Promise<boolean> {
+    // Check regular orders
+    // Accept orders that have been paid (even if not yet completed/delivered)
+    // This allows users to review products after payment, not just after delivery
+    const orderWithProduct = await this.prisma.order.findFirst({
+      where: {
+        userId,
+        status: {
+          in: ['completed', 'delivered', 'confirmed', 'processing', 'paid'],
+        },
+        paymentStatus: {
+          in: ['completed', 'paid', 'processing', 'enterprise_pending'],
+        },
+        orderItems: {
+          some: {
+            productId,
+          },
+        },
+      },
+      include: {
+        orderItems: {
+          where: {
+            productId,
+          },
+        },
+      },
+    });
+
+    if (orderWithProduct) {
+      return true;
+    }
+
+    // Check manufacturer orders (for retailers ordering from manufacturers)
+    const manufacturerOrder = await this.prisma.manufacturerOrder.findFirst({
+      where: {
+        retailerId: userId,
+        productId,
+        status: {
+          in: ['completed', 'delivered', 'processing'],
+        },
+        paymentStatus: {
+          in: ['paid', 'processing', 'enterprise_pending'],
+        },
+      },
+    });
+
+    return !!manufacturerOrder;
+  }
+
+  /**
+   * Get product reviews
+   */
+  async getProductReviews(productId: string, page: number = 1, limit: number = 10) {
+    const skip = (page - 1) * limit;
+
+    const [reviews, total] = await Promise.all([
+      this.prisma.review.findMany({
+        where: {
+          itemId: productId,
+          itemType: 'product',
+          isActive: true,
+        },
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              businessName: true,
+              email: true,
+            },
+          },
+        },
+      }),
+      this.prisma.review.count({
+        where: {
+          itemId: productId,
+          itemType: 'product',
+          isActive: true,
+        },
+      }),
+    ]);
+
+    return {
+      reviews,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /**
+   * Create product review (with verification)
+   */
+  async createProductReview(createProductReviewDto: CreateProductReviewDto, userId: string) {
+    const { productId, rating, title, comment } = createProductReviewDto;
+
+    // Verify product exists
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+    });
+
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+
+    // Verify user has purchased the product
+    const hasPurchased = await this.verifyProductPurchase(userId, productId);
+    if (!hasPurchased) {
+      throw new BadRequestException('You can only review products you have purchased');
+    }
+
+    // Check if review already exists
+    const existingReview = await this.prisma.review.findUnique({
+      where: {
+        userId_itemId_itemType: {
+          userId,
+          itemId: productId,
+          itemType: 'product',
+        },
+      },
+    });
+
+    if (existingReview) {
+      throw new BadRequestException('You have already reviewed this product');
+    }
+
+    // Create review
+    const review = await this.prisma.review.create({
+      data: {
+        userId,
+        itemId: productId,
+        itemType: 'product',
+        rating,
+        title,
+        comment,
+        isVerified: true, // Verified because we checked purchase
+        isActive: true,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            businessName: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    return review;
+  }
+
+  /**
+   * Get product rating summary
+   */
+  async getProductRatingSummary(productId: string) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        price: true,
+        currency: true,
+        imageUrl: true,
+      },
+    });
+
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+
+    const where = {
+      itemId: productId,
+      itemType: 'product',
+      isActive: true,
+    };
+
+    const [totalReviews, averageRating, ratingDistribution, recentReviews] = await Promise.all([
+      this.prisma.review.count({ where }),
+      this.prisma.review.aggregate({
+        where,
+        _avg: { rating: true },
+      }),
+      this.prisma.review.groupBy({
+        by: ['rating'],
+        where,
+        _count: { rating: true },
+      }),
+      this.prisma.review.findMany({
+        where,
+        take: 5,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              businessName: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    return {
+      product,
+      totalReviews,
+      averageRating: averageRating._avg.rating || 0,
+      ratingDistribution: ratingDistribution.reduce((acc, item) => {
+        acc[item.rating] = item._count.rating;
+        return acc;
+      }, {} as Record<number, number>),
+      recentReviews,
+    };
+  }
+
+  // ========== USER REVIEWS ==========
+
+  /**
+   * Verify if user has transacted with the reviewed user
+   */
+  private async verifyUserTransaction(reviewerId: string, reviewedUserId: string): Promise<boolean> {
+    // Get reviewed user's role
+    const reviewedUser = await this.prisma.profile.findUnique({
+      where: { id: reviewedUserId },
+      select: { role: true },
+    });
+
+    if (!reviewedUser) {
+      return false;
+    }
+
+    const reviewedUserRole = reviewedUser.role;
+
+    // Check based on roles
+    if (reviewedUserRole === 'retailer') {
+      // Check if reviewer has ordered from this retailer
+      const order = await this.prisma.order.findFirst({
+        where: {
+          userId: reviewerId,
+          retailerId: reviewedUserId,
+          status: {
+            in: ['completed', 'delivered', 'confirmed'],
+          },
+          paymentStatus: {
+            in: ['completed', 'paid'],
+          },
+        },
+      });
+      return !!order;
+    }
+
+    if (reviewedUserRole === 'vendor') {
+      // Check if reviewer has booked service with this vendor
+      const appointment = await this.prisma.appointment.findFirst({
+        where: {
+          clientId: reviewerId,
+          vendorId: reviewedUserId,
+          status: 'completed',
+        },
+      });
+      return !!appointment;
+    }
+
+    if (reviewedUserRole === 'manufacturer') {
+      // Check if reviewer (retailer) has ordered from this manufacturer
+      const manufacturerOrder = await this.prisma.manufacturerOrder.findFirst({
+        where: {
+          retailerId: reviewerId,
+          manufacturerId: reviewedUserId,
+          status: {
+            in: ['completed', 'delivered'],
+          },
+          paymentStatus: 'paid',
+        },
+      });
+      return !!manufacturerOrder;
+    }
+
+    if (reviewedUserRole === 'client') {
+      // Check if reviewer (vendor/retailer) has served this client
+      // Check appointments
+      const appointment = await this.prisma.appointment.findFirst({
+        where: {
+          clientId: reviewedUserId,
+          vendorId: reviewerId,
+          status: 'completed',
+        },
+      });
+      if (appointment) return true;
+
+      // Check orders
+      const order = await this.prisma.order.findFirst({
+        where: {
+          userId: reviewedUserId,
+          retailerId: reviewerId,
+          status: {
+            in: ['completed', 'delivered', 'confirmed'],
+          },
+          paymentStatus: {
+            in: ['completed', 'paid'],
+          },
+        },
+      });
+      return !!order;
+    }
+
+    return false;
+  }
+
+  /**
+   * Get user reviews
+   */
+  async getUserReviews(userId: string, page: number = 1, limit: number = 10) {
+    const skip = (page - 1) * limit;
+
+    const [reviews, total] = await Promise.all([
+      this.prisma.review.findMany({
+        where: {
+          itemId: userId,
+          itemType: 'user',
+          isActive: true,
+        },
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              businessName: true,
+              email: true,
+              role: true,
+            },
+          },
+        },
+      }),
+      this.prisma.review.count({
+        where: {
+          itemId: userId,
+          itemType: 'user',
+          isActive: true,
+        },
+      }),
+    ]);
+
+    return {
+      reviews,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /**
+   * Create user review (with verification)
+   */
+  async createUserReview(createUserReviewDto: CreateUserReviewDto, userId: string) {
+    const { reviewedUserId, rating, title, comment } = createUserReviewDto;
+
+    // Cannot review yourself
+    if (userId === reviewedUserId) {
+      throw new BadRequestException('You cannot review yourself');
+    }
+
+    // Verify reviewed user exists
+    const reviewedUser = await this.prisma.profile.findUnique({
+      where: { id: reviewedUserId },
+    });
+
+    if (!reviewedUser) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Verify user has transacted with the reviewed user
+    const hasTransacted = await this.verifyUserTransaction(userId, reviewedUserId);
+    if (!hasTransacted) {
+      throw new BadRequestException('You can only review users you have transacted with');
+    }
+
+    // Check if review already exists
+    const existingReview = await this.prisma.review.findUnique({
+      where: {
+        userId_itemId_itemType: {
+          userId,
+          itemId: reviewedUserId,
+          itemType: 'user',
+        },
+      },
+    });
+
+    if (existingReview) {
+      throw new BadRequestException('You have already reviewed this user');
+    }
+
+    // Create review
+    const review = await this.prisma.review.create({
+      data: {
+        userId,
+        itemId: reviewedUserId,
+        itemType: 'user',
+        rating,
+        title,
+        comment,
+        isVerified: true, // Verified because we checked transaction
+        isActive: true,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            businessName: true,
+            email: true,
+            role: true,
+          },
+        },
+      },
+    });
+
+    return review;
+  }
+
+  /**
+   * Get user rating summary
+   */
+  async getUserRatingSummary(userId: string) {
+    const user = await this.prisma.profile.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        fullName: true,
+        businessName: true,
+        email: true,
+        role: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const where = {
+      itemId: userId,
+      itemType: 'user',
+      isActive: true,
+    };
+
+    const [totalReviews, averageRating, ratingDistribution, recentReviews] = await Promise.all([
+      this.prisma.review.count({ where }),
+      this.prisma.review.aggregate({
+        where,
+        _avg: { rating: true },
+      }),
+      this.prisma.review.groupBy({
+        by: ['rating'],
+        where,
+        _count: { rating: true },
+      }),
+      this.prisma.review.findMany({
+        where,
+        take: 5,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              businessName: true,
+              role: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    return {
+      user,
+      totalReviews,
+      averageRating: averageRating._avg.rating || 0,
+      ratingDistribution: ratingDistribution.reduce((acc, item) => {
+        acc[item.rating] = item._count.rating;
+        return acc;
+      }, {} as Record<number, number>),
+      recentReviews,
+    };
+  }
+
+  /**
+   * Update generic review (for products/users)
+   */
+  async updateGenericReview(id: string, updateReviewDto: UpdateReviewDto, userId: string) {
+    const review = await this.prisma.review.findUnique({
+      where: { id },
+    });
+
+    if (!review) {
+      throw new NotFoundException('Review not found');
+    }
+
+    // Check permissions
+    if (review.userId !== userId) {
+      throw new ForbiddenException('You can only update your own reviews');
+    }
+
+    const updatedReview = await this.prisma.review.update({
+      where: { id },
+      data: {
+        rating: updateReviewDto.rating,
+        comment: updateReviewDto.comment || review.comment,
+        title: updateReviewDto.title || review.title,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            businessName: true,
+            email: true,
+            role: true,
+          },
+        },
+      },
+    });
+
+    return updatedReview;
+  }
+
+  /**
+   * Delete generic review (for products/users)
+   */
+  async deleteGenericReview(id: string, userId: string, userRole: string) {
+    const review = await this.prisma.review.findUnique({
+      where: { id },
+    });
+
+    if (!review) {
+      throw new NotFoundException('Review not found');
+    }
+
+    // Check permissions
+    if (userRole !== 'admin' && review.userId !== userId) {
+      throw new ForbiddenException('You can only delete your own reviews');
+    }
+
+    await this.prisma.review.delete({
+      where: { id },
+    });
+
+    return { message: 'Review deleted successfully' };
   }
 }

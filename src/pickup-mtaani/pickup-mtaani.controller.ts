@@ -31,6 +31,39 @@ export class PickupMtaaniController {
   }
 
   /**
+   * Map Pick Up Mtaani state to manufacturer order status
+   */
+  private mapPickupMtaaniStateToManufacturerOrderStatus(
+    state: string,
+    paymentStatus?: string
+  ): string | null {
+    const normalizedState = state.toLowerCase().trim();
+
+    // Map based on Pick Up Mtaani state
+    switch (normalizedState) {
+      case 'request':
+      case 'pending':
+        return 'confirmed' // Order is confirmed but package not yet picked up
+      case 'paid':
+        return 'confirmed' // Payment confirmed
+      case 'picked_up':
+      case 'in_transit':
+      case 'in transit':
+        return 'shipped' // Package is in transit
+      case 'out_for_delivery':
+        return 'shipped' // Out for delivery
+      case 'delivered':
+        return 'delivered' // Package delivered
+      case 'cancelled':
+        return 'cancelled' // Package cancelled
+      case 'returned':
+        return 'cancelled' // Package returned (treat as cancelled for now)
+      default:
+        return null // Don't update status if state is unknown
+    }
+  }
+
+  /**
    * Create business on Pick Up Mtaani
    */
   @UseGuards(JwtAuthGuard)
@@ -262,10 +295,16 @@ export class PickupMtaaniController {
 
   /**
    * Get packages for the logged-in retailer
+   * Supports optional type query parameter: ?type=outgoing (default) or ?type=incoming
    */
   @UseGuards(JwtAuthGuard)
   @Get('packages')
-  async getRetailerPackages(@Request() req) {
+  async getRetailerPackages(@Request() req, @Query('type') type?: string) {
+    // If type is 'incoming', redirect to incoming endpoint
+    if (type === 'incoming') {
+      return this.getRetailerIncomingPackages(req);
+    }
+    // Default to outgoing packages (existing behavior)
     try {
       const userId = req.user.sub;
       this.logger.log(`📦 [RETAILER_PACKAGES] Fetching packages for retailer: ${userId}`);
@@ -442,6 +481,289 @@ export class PickupMtaaniController {
   }
 
   /**
+   * Get incoming packages for the logged-in retailer (from manufacturers)
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('packages/incoming')
+  async getRetailerIncomingPackages(@Request() req) {
+    try {
+      const userId = req.user.sub;
+      this.logger.log(`📦 [RETAILER_INCOMING_PACKAGES] Fetching incoming packages for retailer: ${userId}`);
+
+      // Get all manufacturer orders where this retailer is the recipient
+      // Include orders that are paid, even if they don't have shippingAddress set yet
+      const manufacturerOrders = await this.prisma.manufacturerOrder.findMany({
+        where: {
+          retailerId: userId,
+          OR: [
+            {
+              shippingAddress: {
+                not: null,
+              },
+            },
+            {
+              paymentStatus: 'paid',
+            },
+            {
+              trackingNumber: {
+                not: null,
+              },
+            },
+          ],
+        },
+        include: {
+          manufacturer: {
+            select: {
+              id: true,
+              email: true,
+              fullName: true,
+              businessName: true,
+              phone: true,
+            },
+          },
+          product: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
+
+      this.logger.log(`📦 [RETAILER_INCOMING_PACKAGES] Found ${manufacturerOrders.length} manufacturer orders for retailer ${userId}`);
+
+      // Extract packages from manufacturer orders
+      const packages = [];
+      for (const order of manufacturerOrders) {
+        const shippingAddress = order.shippingAddress as any;
+        
+        // Include orders that are paid or have shipping info
+        const shouldInclude = order.paymentStatus === 'paid' || shippingAddress?.packageId || shippingAddress?.receiptNo || order.trackingNumber;
+        
+        if (shouldInclude) {
+          // Generate receiptNo if not available
+          let receiptNo = shippingAddress?.receiptNo;
+          if (!receiptNo) {
+            if (order.trackingNumber) {
+              receiptNo = order.trackingNumber;
+            } else if (order.paystackReference) {
+              receiptNo = `ORDER-${order.paystackReference.substring(0, 12)}`;
+            } else {
+              receiptNo = `ORDER-${order.id.substring(0, 8).toUpperCase()}`;
+            }
+          }
+
+          packages.push({
+            packageId: shippingAddress?.packageId || null,
+            receiptNo: receiptNo,
+            status: shippingAddress?.state || shippingAddress?.status || (order.paymentStatus === 'paid' ? 'pending_shipping' : 'pending'),
+            paymentStatus: order.paymentStatus || 'pending',
+            trackingLink: shippingAddress?.trackingLink || null,
+            deliveryFee: shippingAddress?.deliveryFee || Number(order.shippingCost) || 0,
+            packageValue: Number(order.totalAmount),
+            packageName: `${order.product.name} (${order.quantity} units)`,
+            customerName: order.manufacturer.businessName || order.manufacturer.fullName || 'Manufacturer',
+            customerPhone: order.manufacturer.phone || '',
+            senderAgentId: shippingAddress?.senderAgentId || null,
+            receiverAgentId: shippingAddress?.receiverAgentId || null,
+            createdAt: shippingAddress?.createdAt || order.createdAt,
+            updatedAt: order.updatedAt,
+            items: [
+              {
+                productId: order.product.id,
+                productName: order.product.name,
+                quantity: order.quantity,
+                price: Number(order.totalAmount),
+              },
+            ],
+            orderId: order.id,
+            orderType: 'manufacturer_order',
+            orderStatus: order.status,
+            manufacturerId: order.manufacturer.id,
+            manufacturerName: order.manufacturer.businessName || order.manufacturer.fullName,
+            manufacturerEmail: order.manufacturer.email,
+          });
+        }
+      }
+
+      this.logger.log(`📦 [RETAILER_INCOMING_PACKAGES] Found ${packages.length} incoming packages for retailer ${userId}`);
+
+      return {
+        success: true,
+        data: packages,
+      };
+    } catch (error) {
+      this.logger.error('❌ [RETAILER_INCOMING_PACKAGES] Error fetching incoming packages:', error);
+      this.logger.error('❌ [RETAILER_INCOMING_PACKAGES] Error details:', {
+        message: error.message,
+        stack: error.stack,
+        userId: req.user?.sub,
+      });
+      return {
+        success: false,
+        error: `Failed to fetch incoming packages: ${error.message}`,
+        data: [],
+      };
+    }
+  }
+
+  /**
+   * Get outgoing packages for the logged-in manufacturer (to retailers)
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('manufacturer/packages')
+  async getManufacturerPackages(@Request() req) {
+    try {
+      const userId = req.user.sub;
+      this.logger.log(`📦 [MANUFACTURER_PACKAGES] Fetching packages for manufacturer: ${userId}`);
+
+      // Get manufacturer's business ID
+      const manufacturerProfile = await this.prisma.profile.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          businessName: true,
+          fullName: true,
+          pickupMtaaniBusinessDetails: true,
+        },
+      });
+
+      if (!manufacturerProfile) {
+        return {
+          success: false,
+          error: 'Manufacturer profile not found',
+          data: [],
+        };
+      }
+
+      // Get all manufacturer orders where this manufacturer is the sender
+      // Include orders that are paid (have paymentStatus = 'paid') even if shippingAddress is not set yet
+      const manufacturerOrders = await this.prisma.manufacturerOrder.findMany({
+        where: {
+          manufacturerId: userId,
+          OR: [
+            {
+              shippingAddress: {
+                not: null,
+              },
+            },
+            {
+              paymentStatus: 'paid',
+            },
+          ],
+        },
+        include: {
+          retailer: {
+            select: {
+              id: true,
+              email: true,
+              fullName: true,
+              businessName: true,
+              phone: true,
+            },
+          },
+          product: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
+
+      this.logger.log(`📦 [MANUFACTURER_PACKAGES] Found ${manufacturerOrders.length} manufacturer orders for manufacturer ${userId}`);
+
+      // Extract packages from manufacturer orders
+      const packages = [];
+      for (const order of manufacturerOrders) {
+        const shippingAddress = order.shippingAddress as any;
+        
+        this.logger.log(`📦 [MANUFACTURER_PACKAGES] Processing order ${order.id}:`, {
+          paymentStatus: order.paymentStatus,
+          hasShippingAddress: !!shippingAddress,
+          packageId: shippingAddress?.packageId,
+          receiptNo: shippingAddress?.receiptNo,
+          trackingNumber: order.trackingNumber,
+        });
+        
+        // Include orders that are paid, even if they don't have shipping package info yet
+        // This ensures all paid orders show up, with or without shipping details
+        const shouldInclude = order.paymentStatus === 'paid' || shippingAddress?.packageId || shippingAddress?.receiptNo || order.trackingNumber;
+        
+        if (shouldInclude) {
+          // Generate receiptNo if not available
+          let receiptNo = shippingAddress?.receiptNo;
+          if (!receiptNo) {
+            if (order.trackingNumber) {
+              receiptNo = order.trackingNumber;
+            } else if (order.paystackReference) {
+              receiptNo = `ORDER-${order.paystackReference.substring(0, 12)}`;
+            } else {
+              receiptNo = `ORDER-${order.id.substring(0, 8).toUpperCase()}`;
+            }
+          }
+
+          packages.push({
+            packageId: shippingAddress?.packageId || null,
+            receiptNo: receiptNo,
+            status: shippingAddress?.state || shippingAddress?.status || (order.paymentStatus === 'paid' ? 'pending_shipping' : 'pending'),
+            paymentStatus: order.paymentStatus || 'pending',
+            trackingLink: shippingAddress?.trackingLink || null,
+            deliveryFee: shippingAddress?.deliveryFee || Number(order.shippingCost) || 0,
+            packageValue: Number(order.totalAmount),
+            packageName: `${order.product.name} (${order.quantity} units)`,
+            customerName: order.retailer.businessName || order.retailer.fullName || 'Retailer',
+            customerPhone: order.retailer.phone || '',
+            senderAgentId: shippingAddress?.senderAgentId || null,
+            receiverAgentId: shippingAddress?.receiverAgentId || null,
+            createdAt: shippingAddress?.createdAt || order.createdAt,
+            updatedAt: order.updatedAt,
+            items: [
+              {
+                productId: order.product.id,
+                productName: order.product.name,
+                quantity: order.quantity,
+                price: Number(order.totalAmount),
+              },
+            ],
+            orderId: order.id,
+            orderType: 'manufacturer_order',
+            orderStatus: order.status,
+            retailerId: order.retailer.id,
+            retailerName: order.retailer.businessName || order.retailer.fullName,
+            retailerEmail: order.retailer.email,
+          });
+        }
+      }
+
+      this.logger.log(`📦 [MANUFACTURER_PACKAGES] Found ${packages.length} packages for manufacturer ${userId}`);
+
+      return {
+        success: true,
+        data: packages,
+      };
+    } catch (error) {
+      this.logger.error('❌ [MANUFACTURER_PACKAGES] Error fetching packages:', error);
+      this.logger.error('❌ [MANUFACTURER_PACKAGES] Error details:', {
+        message: error.message,
+        stack: error.stack,
+        userId: req.user?.sub,
+      });
+      return {
+        success: false,
+        error: `Failed to fetch packages: ${error.message}`,
+        data: [],
+      };
+    }
+  }
+
+  /**
    * Get package details by ID
    */
   @UseGuards(JwtAuthGuard)
@@ -533,7 +855,7 @@ export class PickupMtaaniController {
         };
       }
 
-      // Find and update the order with fresh package data
+      // Find and update the order with fresh package data (regular orders)
       const orders = await this.prisma.order.findMany({
         where: {
           orderItems: {
@@ -550,6 +872,7 @@ export class PickupMtaaniController {
         },
       });
 
+      let foundInOrder = false;
       for (const order of orders) {
         const shippingAddress = (order.shippingAddress as any) || {};
         const packages = shippingAddress.pickupMtaaniPackages || [];
@@ -590,7 +913,100 @@ export class PickupMtaaniController {
           });
 
           this.logger.log(`✅ [PACKAGE_REFRESH] Updated package ${packageId} in order ${order.id}`);
+          foundInOrder = true;
+          break;
         }
+      }
+
+      // If not found in regular orders, check manufacturer orders
+      if (!foundInOrder) {
+        const manufacturerOrders = await this.prisma.manufacturerOrder.findMany({
+          where: {
+            OR: [
+              { retailerId: userId },
+              { manufacturerId: userId },
+            ],
+          },
+          select: {
+            id: true,
+            shippingAddress: true,
+            manufacturerId: true,
+            retailerId: true,
+          },
+        });
+
+        for (const manufacturerOrder of manufacturerOrders) {
+          const shippingAddress = (manufacturerOrder.shippingAddress as any) || {};
+          
+          // Check if this manufacturer order has the packageId
+          if (shippingAddress?.packageId === parseInt(packageId)) {
+            // Get manufacturer's business ID for the API call
+            const manufacturerProfile = await this.prisma.profile.findUnique({
+              where: { id: manufacturerOrder.manufacturerId },
+              select: { pickupMtaaniBusinessDetails: true },
+            });
+
+            const manufacturerBusinessDetails = manufacturerProfile?.pickupMtaaniBusinessDetails as any;
+            const manufacturerBusinessId = manufacturerBusinessDetails?.businessId?.toString();
+
+            // Fetch fresh data using manufacturer's business ID
+            const freshPackageData = manufacturerBusinessId 
+              ? await this.pickupMtaaniService.getPackageByIdentifier(
+                  packageId,
+                  manufacturerBusinessId
+                )
+              : packageData;
+
+            // Get full manufacturer order to access trackingNumber and status
+            const fullManufacturerOrder = await this.prisma.manufacturerOrder.findUnique({
+              where: { id: manufacturerOrder.id },
+              select: {
+                id: true,
+                trackingNumber: true,
+                status: true,
+              },
+            });
+
+            // Update manufacturer order shippingAddress
+            const updatedShippingAddress = {
+              ...shippingAddress,
+              state: freshPackageData.state,
+              status: freshPackageData.state,
+              paymentStatus: freshPackageData.payment_status || shippingAddress.paymentStatus,
+              trackingLink: this.normalizeTrackingLink(freshPackageData.trackingLink || shippingAddress.trackingLink),
+              trackingId: freshPackageData.trackId || shippingAddress.trackingId,
+              receiptNo: freshPackageData.receipt_no || shippingAddress.receiptNo,
+              deliveryFee: freshPackageData.delivery_fee || shippingAddress.deliveryFee,
+              senderAgentId: freshPackageData.senderAgentID_id || freshPackageData.agent_id || shippingAddress.senderAgentId,
+              receiverAgentId: freshPackageData.receieverAgentID_id || shippingAddress.receiverAgentId,
+              updatedAt: new Date().toISOString(),
+            };
+
+            // Map Pick Up Mtaani state to manufacturer order status
+            const newOrderStatus = this.mapPickupMtaaniStateToManufacturerOrderStatus(
+              freshPackageData.state,
+              freshPackageData.payment_status
+            );
+
+            // Update manufacturer order
+            await this.prisma.manufacturerOrder.update({
+              where: { id: manufacturerOrder.id },
+              data: {
+                shippingAddress: updatedShippingAddress as any,
+                trackingNumber: freshPackageData.trackId || freshPackageData.receipt_no || fullManufacturerOrder?.trackingNumber,
+                status: newOrderStatus || fullManufacturerOrder?.status,
+              },
+            });
+
+            this.logger.log(`✅ [PACKAGE_REFRESH] Updated package ${packageId} in manufacturer order ${manufacturerOrder.id}`);
+            foundInOrder = true;
+            break;
+          }
+        }
+      }
+
+      if (!foundInOrder) {
+        this.logger.warn(`⚠️ [PACKAGE_REFRESH] Package ${packageId} not found in any order or manufacturer order`);
       }
 
       return {

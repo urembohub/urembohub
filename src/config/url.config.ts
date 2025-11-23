@@ -17,9 +17,23 @@ export class UrlConfig {
   /**
    * Get the frontend URL
    * Used for redirects, CORS, email links, etc.
+   * In development mode, always uses localhost even if FRONTEND_URL is set to staging
    */
   static getFrontendUrl(): string {
-    return process.env.FRONTEND_URL || 'http://localhost:5173';
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    const envUrl = process.env.FRONTEND_URL;
+    
+    // In development, always use localhost (default port 8080 for Vite)
+    if (isDevelopment) {
+      // If FRONTEND_URL is set but points to staging, override it
+      if (envUrl && envUrl.includes('staging.urembohub.com')) {
+        return 'http://localhost:8080';
+      }
+      return envUrl || 'http://localhost:8080';
+    }
+    
+    // In production/staging, use the configured URL or default to staging
+    return envUrl || 'https://staging.urembohub.com';
   }
 
   /**

@@ -63,9 +63,25 @@ export class PaystackCheckoutController {
     this.logger.log(`Payment callback received - trxref: ${trxref}, reference: ${reference}`);
     
     // Redirect to frontend payment success page
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
+    // Check NODE_ENV first - if development, always use localhost
+    // Otherwise, use FRONTEND_URL (production/staging)
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    let frontendUrl: string;
+    
+    if (isDevelopment) {
+      // In development, always use localhost regardless of FRONTEND_URL
+      frontendUrl = 'http://localhost:8080';
+      this.logger.log(`🌍 [REDIRECT] Development mode detected - using localhost`);
+    } else {
+      // In production/staging, use FRONTEND_URL or fallback to staging URL
+      frontendUrl = process.env.FRONTEND_URL || 'https://staging.urembohub.com';
+      this.logger.log(`🌍 [REDIRECT] Production/Staging mode - using configured FRONTEND_URL`);
+    }
+    
     const redirectUrl = `${frontendUrl}/payment-success?reference=${reference || trxref}`;
     
+    this.logger.log(`🌍 [REDIRECT] NODE_ENV: ${process.env.NODE_ENV}`);
+    this.logger.log(`🌍 [REDIRECT] Frontend URL: ${frontendUrl}`);
     this.logger.log(`Redirecting to: ${redirectUrl}`);
     return res.redirect(redirectUrl);
   }

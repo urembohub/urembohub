@@ -155,13 +155,14 @@ export class PaymentVerificationService {
 
   /**
    * Update package status directly (find order by packageId)
+   * Handles both regular orders and manufacturer orders
    */
   private async updatePackageStatusDirectly(
     packageId: number,
     status: string,
     packageData: any
   ) {
-    // Find order containing this package
+    // First, try to find in regular orders
     const orders = await this.prisma.order.findMany({
       where: {
         status: {
@@ -200,9 +201,149 @@ export class PaymentVerificationService {
       }
     }
 
+    // If not found in regular orders, check manufacturer orders
+    const manufacturerOrders = await this.prisma.manufacturerOrder.findMany({
+      where: {
+        paymentStatus: {
+          in: ["paid", "pending"],
+        },
+      },
+    })
+
+    for (const manufacturerOrder of manufacturerOrders) {
+      const shippingAddress = (manufacturerOrder.shippingAddress as any) || {}
+      
+      // Check if this manufacturer order has the packageId
+      if (shippingAddress?.packageId === packageId) {
+        // Update manufacturer order package status
+        await this.updateManufacturerOrderPackageStatus(
+          manufacturerOrder.id,
+          packageId,
+          status,
+          packageData
+        )
+        
+        this.logger.log(
+          `✅ [WEBHOOK] Updated manufacturer order ${manufacturerOrder.id} package ${packageId} status to ${status} from Pickup Mtaani`
+        )
+        return
+      }
+    }
+
     this.logger.warn(
-      `⚠️ [WEBHOOK] No order found containing package ${packageId}`
+      `⚠️ [WEBHOOK] No order or manufacturer order found containing package ${packageId}`
     )
+  }
+
+  /**
+   * Update package status in manufacturer order's shippingAddress
+   */
+  private async updateManufacturerOrderPackageStatus(
+    manufacturerOrderId: string,
+    packageId: number,
+    status: string,
+    packageData: any
+  ) {
+    try {
+      const manufacturerOrder = await this.prisma.manufacturerOrder.findUnique({
+        where: { id: manufacturerOrderId },
+      })
+
+      if (!manufacturerOrder) {
+        this.logger.error(`❌ [UPDATE] Manufacturer order ${manufacturerOrderId} not found`)
+        return
+      }
+
+      const shippingAddress = (manufacturerOrder.shippingAddress as any) || {}
+
+      // Update shippingAddress with fresh data from Pick Up Mtaani
+      const updatedShippingAddress = {
+        ...shippingAddress,
+        packageId: packageId,
+        state: status,
+        status: status,
+        paymentStatus: packageData.payment_status || shippingAddress.paymentStatus,
+        trackingLink: this.normalizeTrackingLink(packageData.trackingLink || shippingAddress.trackingLink),
+        trackingId: packageData.trackId || shippingAddress.trackingId,
+        receiptNo: packageData.receipt_no || shippingAddress.receiptNo,
+        deliveryFee: packageData.delivery_fee || shippingAddress.deliveryFee,
+        senderAgentId: packageData.senderAgentID_id || packageData.agent_id || shippingAddress.senderAgentId,
+        receiverAgentId: packageData.receieverAgentID_id || shippingAddress.receiverAgentId,
+        updatedAt: new Date().toISOString(),
+        lastUpdatedFromApi: new Date().toISOString(),
+      }
+
+      // Map Pick Up Mtaani state to manufacturer order status
+      const newOrderStatus = this.mapPickupMtaaniStateToManufacturerOrderStatus(status, packageData.payment_status)
+
+      // Update manufacturer order
+      await this.prisma.manufacturerOrder.update({
+        where: { id: manufacturerOrderId },
+        data: {
+          shippingAddress: updatedShippingAddress as any,
+          trackingNumber: packageData.trackId || packageData.receipt_no || manufacturerOrder.trackingNumber,
+          status: newOrderStatus || manufacturerOrder.status,
+        },
+      })
+
+      this.logger.log(
+        `✅ [UPDATE] Updated manufacturer order ${manufacturerOrderId} package status to ${status}`
+      )
+    } catch (error) {
+      this.logger.error(
+        `❌ [UPDATE] Error updating manufacturer order package status:`,
+        error.message
+      )
+      throw error
+    }
+  }
+
+  /**
+   * Map Pick Up Mtaani state to manufacturer order status
+   */
+  private mapPickupMtaaniStateToManufacturerOrderStatus(
+    state: string,
+    paymentStatus?: string
+  ): string | null {
+    const normalizedState = state.toLowerCase().trim()
+
+    // Map based on Pick Up Mtaani state
+    switch (normalizedState) {
+      case 'request':
+      case 'pending':
+        return 'confirmed' // Order is confirmed but package not yet picked up
+      case 'paid':
+        return 'confirmed' // Payment confirmed
+      case 'picked_up':
+      case 'in_transit':
+      case 'in transit':
+        return 'shipped' // Package is in transit
+      case 'out_for_delivery':
+        return 'shipped' // Out for delivery
+      case 'delivered':
+        return 'delivered' // Package delivered
+      case 'cancelled':
+        return 'cancelled' // Package cancelled
+      case 'returned':
+        return 'cancelled' // Package returned (treat as cancelled for now)
+      default:
+        return null // Don't update status if state is unknown
+    }
+  }
+
+  /**
+   * Normalize tracking link
+   */
+  private normalizeTrackingLink(trackingLink: string | undefined): string | undefined {
+    if (!trackingLink) return undefined
+    
+    // If already has protocol, return as is
+    if (trackingLink.startsWith('http://') || trackingLink.startsWith('https://')) {
+      return trackingLink
+    }
+    
+    // Add https:// protocol
+    return `https://${trackingLink}`
   }
 
   /**

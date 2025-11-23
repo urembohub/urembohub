@@ -74,6 +74,26 @@ export class PaymentsService {
   }
 
   /**
+   * Get the backend URL for callbacks/webhooks
+   * Uses localhost in development, configured URL in production
+   */
+  private getBackendUrl(): string {
+    const isDevelopment = this.configService.get<string>('NODE_ENV') === 'development';
+    const envBackendUrl = this.configService.get<string>('BACKEND_URL');
+    
+    // In development, always use localhost even if BACKEND_URL is set to staging
+    if (isDevelopment) {
+      if (envBackendUrl && envBackendUrl.includes('staging.urembohub.com')) {
+        return 'http://localhost:3000';
+      }
+      return envBackendUrl || 'http://localhost:3000';
+    }
+    
+    // In production/staging, use the configured URL
+    return envBackendUrl || 'https://api.urembohub.com';
+  }
+
+  /**
    * Normalize tracking link to ensure it has proper protocol
    * @param trackingLink The tracking link from Pick Up Mtaani
    * @returns Normalized tracking link with https:// protocol
@@ -175,7 +195,7 @@ export class PaymentsService {
           })),
         },
         split_code: await this.createSplitCode(paymentGroupData),
-        callback_url: `${this.configService.get("BACKEND_URL") || "http://localhost:3000"}/api/paystack/checkout/webhook`,
+        callback_url: `${this.getBackendUrl()}/api/paystack/checkout/webhook`,
       }
 
       const response = await axios.post(
@@ -485,7 +505,7 @@ export class PaymentsService {
         currency: paymentData.currency,
         email: paymentData.email,
         reference: reference,
-        callback_url: `${this.configService.get("BACKEND_URL") || "http://localhost:3000"}/api/paystack/checkout/webhook`,
+        callback_url: `${this.getBackendUrl()}/api/paystack/checkout/webhook`,
         metadata: {
           ...paymentData.metadata,
           customer_name: paymentData.customerName,
@@ -1258,6 +1278,7 @@ export class PaymentsService {
             select: {
               id: true,
               name: true,
+              sku: true,
             },
           },
         },
@@ -1280,6 +1301,149 @@ export class PaymentsService {
       });
 
       console.log("✅ [MANUFACTURER_ORDER_PAYMENT] Order payment status updated");
+
+      // Get manufacturer product details (needed for both stock updates)
+      const manufacturerProduct = await this.prisma.product.findUnique({
+        where: { id: manufacturerOrder.productId },
+        select: {
+          id: true,
+          stockQuantity: true,
+          name: true,
+          sku: true,
+        },
+      });
+
+      if (!manufacturerProduct) {
+        console.error("❌ [MANUFACTURER_ORDER_PAYMENT] Manufacturer product not found:", manufacturerOrder.productId);
+      }
+
+      // Reduce manufacturer product stock quantity ONLY after successful payment
+      if (manufacturerProduct) {
+        try {
+          const currentStock = Number(manufacturerProduct.stockQuantity);
+          const orderedQuantity = manufacturerOrder.quantity;
+          const newStock = currentStock - orderedQuantity;
+
+          if (newStock < 0) {
+            console.warn(`⚠️ [MANUFACTURER_ORDER_PAYMENT] Stock would go negative for product ${manufacturerProduct.name}. Current: ${currentStock}, Ordered: ${orderedQuantity}`);
+            // Still update but set to 0 to prevent negative stock
+            await this.prisma.product.update({
+              where: { id: manufacturerProduct.id },
+              data: {
+                stockQuantity: 0,
+              },
+            });
+          } else {
+            await this.prisma.product.update({
+              where: { id: manufacturerProduct.id },
+              data: {
+                stockQuantity: newStock,
+              },
+            });
+            console.log(`✅ [MANUFACTURER_ORDER_PAYMENT] Manufacturer stock reduced for product ${manufacturerProduct.name}: ${currentStock} → ${newStock} (ordered: ${orderedQuantity})`);
+          }
+        } catch (stockError) {
+          console.error("❌ [MANUFACTURER_ORDER_PAYMENT] Error reducing manufacturer product stock:", stockError);
+          // Don't fail the payment processing if stock update fails, but log it
+        }
+      }
+
+      // Increase retailer product stock quantity after successful payment
+      if (manufacturerProduct) {
+        try {
+          // Try to find retailer product by matching SKU or name
+          // First, check if retailer product ID is stored in metadata (if metadata field exists)
+          let retailerProductId = null;
+          try {
+            const metadata = (manufacturerOrder as any).metadata as any;
+            if (metadata && metadata.retailerProductId) {
+              retailerProductId = metadata.retailerProductId;
+            }
+          } catch (e) {
+            // Metadata field might not exist, continue with SKU/name matching
+          }
+
+          // If not in metadata, try to find retailer product by SKU match
+          if (!retailerProductId && manufacturerProduct.sku) {
+          const retailerProduct = await this.prisma.product.findFirst({
+            where: {
+              retailerId: manufacturerOrder.retailerId,
+              sku: manufacturerProduct.sku,
+              manufacturerId: null, // Make sure it's a retailer product, not manufacturer product
+            },
+            select: {
+              id: true,
+              stockQuantity: true,
+              name: true,
+              sku: true,
+            },
+          });
+
+          if (retailerProduct) {
+            retailerProductId = retailerProduct.id;
+            console.log(`✅ [MANUFACTURER_ORDER_PAYMENT] Found retailer product by SKU match: ${retailerProduct.name} (SKU: ${retailerProduct.sku})`);
+          }
+        }
+
+        // If still not found, try matching by product name (less reliable but better than nothing)
+        if (!retailerProductId && manufacturerProduct?.name) {
+          const retailerProduct = await this.prisma.product.findFirst({
+            where: {
+              retailerId: manufacturerOrder.retailerId,
+              name: {
+                contains: manufacturerProduct.name,
+                mode: 'insensitive',
+              },
+              manufacturerId: null,
+            },
+            select: {
+              id: true,
+              stockQuantity: true,
+              name: true,
+            },
+          });
+
+          if (retailerProduct) {
+            retailerProductId = retailerProduct.id;
+            console.log(`✅ [MANUFACTURER_ORDER_PAYMENT] Found retailer product by name match: ${retailerProduct.name}`);
+          }
+        }
+
+        if (retailerProductId) {
+          const retailerProduct = await this.prisma.product.findUnique({
+            where: { id: retailerProductId },
+            select: {
+              id: true,
+              stockQuantity: true,
+              name: true,
+            },
+          });
+
+          if (retailerProduct) {
+            const currentStock = Number(retailerProduct.stockQuantity);
+            const orderedQuantity = manufacturerOrder.quantity;
+            const newStock = currentStock + orderedQuantity;
+
+            await this.prisma.product.update({
+              where: { id: retailerProduct.id },
+              data: {
+                stockQuantity: newStock,
+              },
+            });
+
+            console.log(`✅ [MANUFACTURER_ORDER_PAYMENT] Retailer stock increased for product ${retailerProduct.name}: ${currentStock} → ${newStock} (added: ${orderedQuantity})`);
+          } else {
+            console.warn(`⚠️ [MANUFACTURER_ORDER_PAYMENT] Retailer product not found with ID: ${retailerProductId}`);
+          }
+        } else {
+          console.warn(`⚠️ [MANUFACTURER_ORDER_PAYMENT] Could not find retailer product to update stock. Manufacturer product: ${manufacturerProduct?.name || 'N/A'} (SKU: ${manufacturerProduct?.sku || 'N/A'}), Retailer ID: ${manufacturerOrder.retailerId}`);
+          console.warn(`⚠️ [MANUFACTURER_ORDER_PAYMENT] Consider storing retailerProductId in manufacturer order metadata for accurate stock updates`);
+        }
+      } catch (stockError) {
+        console.error("❌ [MANUFACTURER_ORDER_PAYMENT] Error increasing retailer product stock:", stockError);
+        // Don't fail the payment processing if stock update fails, but log it
+      }
+      }
 
       // Create shipping package using the injected PickupMtaaniService
       
@@ -1313,6 +1477,17 @@ export class PaymentsService {
         };
       }
 
+      // Get retailer phone number - check delivery details first, then profile, then use default
+      let retailerPhone = '';
+      if (retailerDelivery?.phone || retailerDelivery?.phoneNumber) {
+        retailerPhone = retailerDelivery.phone || retailerDelivery.phoneNumber;
+      } else if (manufacturerOrder.retailer.phone) {
+        retailerPhone = manufacturerOrder.retailer.phone;
+      } else {
+        // Use default phone number if none available (Pick Up Mtaani requires valid format)
+        retailerPhone = '0700000000';
+      }
+
       // Create package
       const packageData: any = {
         senderAgentId,
@@ -1320,7 +1495,7 @@ export class PaymentsService {
         packageValue: Number(manufacturerOrder.totalAmount),
         customerName: manufacturerOrder.retailer.businessName || manufacturerOrder.retailer.fullName || 'Retailer',
         packageName: `${manufacturerOrder.product.name} (${manufacturerOrder.quantity} units)`,
-        customerPhoneNumber: manufacturerOrder.retailer.phone || '',
+        customerPhoneNumber: retailerPhone,
         paymentOption: 'vendor',
         on_delivery_balance: 0,
       };
@@ -1338,30 +1513,71 @@ export class PaymentsService {
 
       const packageResult = await this.pickupMtaaniService.createPackage(packageData, String(businessId));
 
+      // Immediately fetch latest package status from Pick Up Mtaani to ensure we have the most current data
+      let freshPackageData = null;
+      try {
+        freshPackageData = await this.pickupMtaaniService.getPackageByIdentifier(
+          packageResult.data.id,
+          String(businessId),
+          deliveryMode === 'door'
+        );
+        console.log(`✅ [MANUFACTURER_ORDER_PAYMENT] Immediately refreshed package ${packageResult.data.id} status from Pick Up Mtaani`);
+      } catch (error) {
+        console.warn(`⚠️ [MANUFACTURER_ORDER_PAYMENT] Failed to immediately refresh package ${packageResult.data.id} status:`, error.message);
+        // Don't fail package creation if refresh fails - background job will handle it
+      }
+
+      // Use fresh data if available, otherwise use initial response
+      const packageDataToStore = freshPackageData || packageResult.data;
+
       // Update order with shipping information
       const shippingAddress = {
         ...(manufacturerOrder.shippingAddress as any || {}),
-        packageId: packageResult.data.id,
-        receiptNo: packageResult.data.receipt_no,
-        trackingId: packageResult.data.trackId,
-        trackingLink: packageResult.data.trackingLink,
-        deliveryFee: packageResult.data.delivery_fee,
-        state: packageResult.data.state,
-        createdAt: packageResult.data.createdAt,
-        senderAgentId: packageResult.data.senderAgentID_id,
-        receiverAgentId: packageResult.data.receieverAgentID_id,
+        packageId: packageDataToStore.id,
+        receiptNo: packageDataToStore.receipt_no,
+        trackingId: packageDataToStore.trackId,
+        trackingLink: this.normalizeTrackingLink(packageDataToStore.trackingLink),
+        deliveryFee: packageDataToStore.delivery_fee,
+        state: packageDataToStore.state,
+        status: packageDataToStore.state,
+        paymentStatus: packageDataToStore.payment_status,
+        createdAt: packageDataToStore.createdAt,
+        senderAgentId: packageDataToStore.senderAgentID_id || packageDataToStore.agent_id,
+        receiverAgentId: packageDataToStore.receieverAgentID_id,
         deliveryMode,
+        updatedAt: new Date().toISOString(),
       };
 
       await this.prisma.manufacturerOrder.update({
         where: { id: orderId },
         data: {
           shippingAddress: shippingAddress as any,
-          trackingNumber: packageResult.data.trackId || packageResult.data.receipt_no,
+          trackingNumber: packageDataToStore.trackId || packageDataToStore.receipt_no,
         },
       });
 
       console.log("✅ [MANUFACTURER_ORDER_PAYMENT] Shipping package created");
+
+      // Add package tracking job for manufacturer order
+      try {
+        await this.packageTrackingQueueService.addPackageTrackingJob({
+          orderId: orderId,
+          packageId: packageResult.data.id,
+          businessId: String(businessId),
+          retailerId: manufacturerOrder.retailerId,
+          retailerName: manufacturerOrder.retailer.businessName || manufacturerOrder.retailer.fullName,
+          customerEmail: manufacturerOrder.retailer.email,
+          customerName: manufacturerOrder.retailer.businessName || manufacturerOrder.retailer.fullName || 'Retailer',
+          isDoorDelivery: deliveryMode === 'door',
+          doorstepDestinationId: deliveryMode === 'door' ? doorstepDestinationId : undefined,
+          isManufacturerOrder: true, // Flag to indicate this is a manufacturer order
+        }, 30 * 1000) // Start tracking after 30 seconds
+
+        console.log(`📦 [MANUFACTURER_ORDER_PAYMENT] Added tracking job for package ${packageResult.data.id} ${deliveryMode === 'door' ? '(🚪 Door Delivery)' : '(🚚 Agent Pick-up)'}`)
+      } catch (error) {
+        console.error(`❌ [MANUFACTURER_ORDER_PAYMENT] Failed to add tracking job for package ${packageResult.data.id}:`, error)
+        // Don't fail package creation if tracking job fails
+      }
 
       return {
         success: true,
@@ -2261,6 +2477,57 @@ export class PaymentsService {
             // Track actual payment intent (even though API uses "vendor" for doorstep)
             actualPaymentOption: paymentOption,
           })
+
+          // Immediately fetch latest package status from Pick Up Mtaani to ensure we have the most current data
+          try {
+            const freshPackageData = await this.pickupMtaaniService.getPackageByIdentifier(
+              packageResponse.data.id,
+              businessIdValidation.businessId,
+              deliveryMode === "door"
+            );
+
+            if (freshPackageData) {
+              // Update the last package in the array (the one we just added) with fresh data
+              const lastPackageIndex = packages.length - 1;
+              packages[lastPackageIndex] = {
+                ...packages[lastPackageIndex],
+                status: freshPackageData.state,
+                paymentStatus: freshPackageData.payment_status,
+                trackingLink: this.normalizeTrackingLink(freshPackageData.trackingLink),
+                receiptNo: freshPackageData.receipt_no,
+                deliveryFee: freshPackageData.delivery_fee,
+                updatedAt: freshPackageData.createdAt,
+              };
+
+              // Get current shippingAddress to update
+              const currentOrder = await this.prisma.order.findUnique({
+                where: { id: order.id },
+                select: { shippingAddress: true },
+              });
+
+              const currentShippingAddress = (currentOrder?.shippingAddress as any) || {};
+
+              // Update order with fresh package data
+              await this.prisma.order.update({
+                where: { id: order.id },
+                data: {
+                  shippingAddress: {
+                    ...currentShippingAddress,
+                    pickupMtaaniPackages: packages,
+                  },
+                  packageStatus: freshPackageData.state,
+                  packageTrackingId: freshPackageData.trackId,
+                  packageReceiptNo: freshPackageData.receipt_no,
+                  packageTrackingLink: this.normalizeTrackingLink(freshPackageData.trackingLink),
+                },
+              });
+
+              console.log(`✅ [PACKAGE_CREATION] Immediately refreshed package ${packageResponse.data.id} status from Pick Up Mtaani`)
+            }
+          } catch (error) {
+            console.warn(`⚠️ [PACKAGE_CREATION] Failed to immediately refresh package ${packageResponse.data.id} status:`, error.message)
+            // Don't fail package creation if refresh fails - background job will handle it
+          }
 
           // Add package tracking job
           try {

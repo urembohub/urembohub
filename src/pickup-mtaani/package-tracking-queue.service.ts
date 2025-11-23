@@ -14,6 +14,7 @@ export interface PackageTrackingJobData {
   retryCount?: number;
   isDoorDelivery?: boolean; // Track if this is a doorstep package
   doorstepDestinationId?: number; // Door delivery destination ID
+  isManufacturerOrder?: boolean; // Flag to indicate this is a manufacturer order (not a regular order)
 }
 
 @Injectable()

@@ -10,4 +10,12 @@ export class UpdateReviewDto {
   @IsOptional()
   @IsString()
   reviewText?: string;
+
+  @IsOptional()
+  @IsString()
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  comment?: string;
 }

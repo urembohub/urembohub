@@ -59,7 +59,8 @@
     "test:paystack:subaccounts": "ts-node src/scripts/test-paystack-subaccounts.ts",
     "test:split:payments": "ts-node src/scripts/test-split-payments.ts",
     "setup:ngrok": "ts-node src/scripts/setup-ngrok.ts",
-    "test:communication": "ts-node src/scripts/test-communication-service.ts"
+    "test:communication": "ts-node src/scripts/test-communication-service.ts",
+    "verify:manufacturer-packages": "ts-node scripts/verify-manufacturer-packages.ts"
   },
   "dependencies": {
     "@bull-board/api": "^6.13.0",
@@ -90,7 +91,9 @@
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "passport-local": "^1.0.0",
+    "react-markdown": "^10.1.0",
     "reflect-metadata": "^0.1.13",
+    "remark-gfm": "^4.0.1",
     "resend": "^4.0.0",
     "rxjs": "^7.8.1",
     "uuid": "^9.0.1"
