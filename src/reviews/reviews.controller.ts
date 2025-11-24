@@ -197,6 +197,26 @@ export class ReviewsController {
     return this.reviewsService.getProductRatingSummary(productId);
   }
 
+  // Get product reviews by user ID
+  @Get('product/user/:userId')
+  @UseGuards(JwtAuthGuard)
+  async getProductReviewsByUserId(
+    @Request() req,
+    @Param('userId') userId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    // Check if user can view these reviews
+    if (req.user.role !== 'admin' && req.user.sub !== userId) {
+      throw new Error('You can only view your own reviews');
+    }
+
+    const pageNum = page ? parseInt(page, 10) : 1;
+    const limitNum = limit ? parseInt(limit, 10) : 10;
+    
+    return this.reviewsService.getProductReviewsByUserId(userId, pageNum, limitNum);
+  }
+
   // ========== USER REVIEW ENDPOINTS ==========
 
   // Get user reviews

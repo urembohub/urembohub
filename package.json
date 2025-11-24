@@ -28,6 +28,7 @@
     "db:seed:admin": "ts-node prisma/seed-admin.ts",
     "db:seed:all": "ts-node prisma/seed-all.ts",
     "db:seed:test-data": "ts-node scripts/seed-test-data.ts",
+    "check:manufacturer-stats": "ts-node src/scripts/check-manufacturer-stats.ts",
     "db:studio": "prisma studio",
     "test:emails": "ts-node src/scripts/test-emails.ts",
     "test:emails:auth": "ts-node src/scripts/test-auth-emails.ts",
@@ -60,7 +61,8 @@
     "test:split:payments": "ts-node src/scripts/test-split-payments.ts",
     "setup:ngrok": "ts-node src/scripts/setup-ngrok.ts",
     "test:communication": "ts-node src/scripts/test-communication-service.ts",
-    "verify:manufacturer-packages": "ts-node scripts/verify-manufacturer-packages.ts"
+    "verify:manufacturer-packages": "ts-node scripts/verify-manufacturer-packages.ts",
+    "check:vendor-subaccount": "ts-node src/scripts/check-vendor-subaccount.ts"
   },
   "dependencies": {
     "@bull-board/api": "^6.13.0",

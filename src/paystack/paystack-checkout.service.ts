@@ -55,6 +55,9 @@ export class PaystackCheckoutService {
    * Now uses Payment Groups by default for multi-vendor orders
    */
   async initializePayment(createPaymentDto: CreatePaymentDto) {
+    // Declare commissionData at function scope so it's accessible in catch block
+    let commissionData: any = null;
+    
     try {
       console.log('💳 [PAYSTACK_CHECKOUT] ===========================================');
       console.log('💳 [PAYSTACK_CHECKOUT] INITIALIZING PAYMENT');
@@ -187,7 +190,7 @@ export class PaystackCheckoutService {
       console.log('💳 [PAYSTACK_CHECKOUT] Using standard payment for single vendor order...');
       
       // Calculate commission and split payment for single vendor
-      const commissionData = await this.calculateCommission(order);
+      commissionData = await this.calculateCommission(order);
       
       // Prepare Paystack payment data
       const paymentData: any = {
@@ -206,9 +209,38 @@ export class PaystackCheckoutService {
 
       // For testing: Skip sub-account if it's a test account
       if (commissionData.partnerSubaccountId && !commissionData.partnerSubaccountId.startsWith('ACCT_test_')) {
-        paymentData.subaccount = commissionData.partnerSubaccountId;
-        // Note: We only use 'subaccount', not 'split_code' as they are mutually exclusive
-        this.logger.log(`Using ${commissionData.partnerType} sub-account: ${commissionData.partnerSubaccountId}`);
+        // Verify subaccount exists in Paystack before using it
+        try {
+          const subaccountResponse = await axios.get(
+            `${this.paystackBaseUrl}/subaccount/${commissionData.partnerSubaccountId}`,
+            {
+              headers: {
+                Authorization: `Bearer ${this.paystackSecretKey}`,
+              },
+            }
+          );
+
+          if (subaccountResponse.data.status && subaccountResponse.data.data) {
+            const subaccount = subaccountResponse.data.data;
+            // Check if subaccount is active and verified
+            if (!subaccount.active || !subaccount.is_verified) {
+              throw new Error(`Subaccount ${commissionData.partnerSubaccountId} is not active or verified. Active: ${subaccount.active}, Verified: ${subaccount.is_verified}`);
+            }
+            paymentData.subaccount = commissionData.partnerSubaccountId;
+            this.logger.log(`Using ${commissionData.partnerType} sub-account: ${commissionData.partnerSubaccountId}`);
+          } else {
+            throw new Error(`Subaccount ${commissionData.partnerSubaccountId} not found in Paystack`);
+          }
+        } catch (verifyError: any) {
+          // If subaccount verification fails, throw error - subaccount is REQUIRED for vendor payments
+          const errorMessage = verifyError.response?.data?.message || verifyError.message;
+          this.logger.error(`Failed to verify subaccount ${commissionData.partnerSubaccountId}: ${errorMessage}`);
+          
+          // Clear invalid subaccount from database
+          await this.clearInvalidSubaccount(commissionData.partnerSubaccountId, commissionData.partnerType);
+          
+          throw new Error(`${commissionData.partnerType === 'vendor' ? 'Vendor' : 'Retailer'} subaccount is invalid or not found in Paystack. ${errorMessage}. Please complete onboarding to create a valid subaccount.`);
+        }
       } else {
         this.logger.log(`Skipping sub-account for testing: ${commissionData.partnerSubaccountId}`);
       }
@@ -260,6 +292,20 @@ export class PaystackCheckoutService {
           url: error.config?.url,
           method: error.config?.method,
         });
+
+        // Handle invalid subaccount error specifically
+        // commissionData is declared outside try block, so it's accessible here
+        if (error.response.status === 404 && 
+            error.response.data?.message?.includes('Invalid Subaccount') &&
+            commissionData?.partnerSubaccountId) {
+          this.logger.error(`Invalid subaccount detected: ${commissionData.partnerSubaccountId}`);
+          
+          // Clear invalid subaccount from database
+          await this.clearInvalidSubaccount(commissionData.partnerSubaccountId, commissionData.partnerType);
+          
+          // Throw error - subaccount is REQUIRED for vendor payments
+          throw new Error(`${commissionData.partnerType === 'vendor' ? 'Vendor' : 'Retailer'} subaccount is invalid or not found in Paystack. Please complete onboarding to create a valid subaccount.`);
+        }
       } else if (error.request) {
         this.logger.error('Paystack API Request Error:', {
           message: error.message,
@@ -1439,6 +1485,34 @@ export class PaystackCheckoutService {
     } catch (error) {
       this.logger.error('Error handling settlement failed:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Clear invalid subaccount from database
+   */
+  private async clearInvalidSubaccount(subaccountId: string, partnerType: string) {
+    try {
+      const partner = await this.prisma.profile.findFirst({
+        where: {
+          paystackSubaccountId: subaccountId,
+          role: partnerType === 'vendor' ? 'vendor' : partnerType === 'retailer' ? 'retailer' : undefined,
+        },
+      });
+
+      if (partner) {
+        await this.prisma.profile.update({
+          where: { id: partner.id },
+          data: {
+            paystackSubaccountId: null,
+            paystackSubaccountStatus: null,
+            paystackSubaccountVerified: false,
+          },
+        });
+        this.logger.warn(`Cleared invalid subaccount ${subaccountId} from ${partnerType} ${partner.email}`);
+      }
+    } catch (clearError) {
+      this.logger.error(`Failed to clear invalid subaccount: ${clearError}`);
     }
   }
 }

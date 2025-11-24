@@ -135,9 +135,15 @@ export class ReviewsService {
 
   // Create new review
   async createReview(createReviewDto: CreateReviewDto, userId: string) {
+    // Log the incoming request for debugging
+    console.log('🔍 [REVIEW] createReview called:', {
+      userId,
+      createReviewDto,
+    });
     const {
       serviceId,
       appointmentId,
+      serviceAppointmentId,
       clientId,
       vendorId,
       staffId,
@@ -145,20 +151,17 @@ export class ReviewsService {
       reviewText,
     } = createReviewDto;
 
+    // Validate that either appointmentId or serviceAppointmentId is provided
+    if (!appointmentId && !serviceAppointmentId) {
+      throw new BadRequestException('Either appointmentId or serviceAppointmentId must be provided');
+    }
+
     // Validate service exists
     const service = await this.prisma.service.findUnique({
       where: { id: serviceId },
     });
     if (!service) {
       throw new BadRequestException('Invalid service ID');
-    }
-
-    // Validate appointment exists
-    const appointment = await this.prisma.appointment.findUnique({
-      where: { id: appointmentId },
-    });
-    if (!appointment) {
-      throw new BadRequestException('Invalid appointment ID');
     }
 
     // Validate client exists
@@ -187,10 +190,194 @@ export class ReviewsService {
       }
     }
 
+    let finalAppointmentId: string;
+    let appointmentStatus: string | null = null;
+
+    // Handle ServiceAppointment (from orders)
+    if (serviceAppointmentId) {
+      const serviceAppointment = await this.prisma.serviceAppointment.findUnique({
+        where: { id: serviceAppointmentId },
+        include: {
+          order: {
+            select: {
+              id: true,
+              userId: true,
+              clientId: true,
+              customerEmail: true,
+            },
+          },
+        },
+      });
+
+      if (!serviceAppointment) {
+        throw new BadRequestException('Invalid service appointment ID');
+      }
+
+      // Verify that the order belongs to the client
+      // Check both userId and clientId since orders can use either field
+      const orderUserId = serviceAppointment.order?.userId;
+      const orderClientId = serviceAppointment.order?.clientId;
+      
+      // Debug logging
+      console.log('🔍 [REVIEW] ServiceAppointment validation:', {
+        serviceAppointmentId,
+        clientId,
+        userId, // The authenticated user ID from JWT
+        orderId: serviceAppointment.order?.id,
+        orderUserId,
+        orderClientId,
+        orderEmail: serviceAppointment.order?.customerEmail,
+      });
+      
+      // Check if order exists
+      if (!serviceAppointment.order) {
+        throw new BadRequestException('Service appointment not found');
+      }
+      
+      // Verify ownership: check if the authenticated user (userId) or clientId matches the order
+      // Also check if clientId matches userId (they should be the same for authenticated users)
+      const isOwner = 
+        orderUserId === userId || 
+        orderUserId === clientId || 
+        orderClientId === userId || 
+        orderClientId === clientId;
+      
+      if (!isOwner) {
+        // Try to find the client by email as a fallback (only if needed)
+        // First check if clientId matches userId (they should be the same)
+        if (clientId === userId) {
+          // If clientId matches userId, but order doesn't match, check email
+          const client = await this.prisma.profile.findUnique({
+            where: { id: clientId },
+            select: { email: true },
+          });
+          
+          if (client && serviceAppointment.order.customerEmail === client.email) {
+            // Email matches, allow the review
+            console.log('✅ [REVIEW] Order ownership verified by email match');
+          } else {
+            console.error('❌ [REVIEW] Order ownership verification failed:', {
+              serviceAppointmentId,
+              orderUserId,
+              orderClientId,
+              clientId,
+              userId,
+              orderEmail: serviceAppointment.order.customerEmail,
+              clientEmail: client?.email,
+              orderId: serviceAppointment.order.id,
+            });
+            throw new BadRequestException('You can only review services from your own orders');
+          }
+        } else {
+          // clientId doesn't match userId, reject
+          console.error('❌ [REVIEW] Order ownership verification failed - clientId mismatch:', {
+            serviceAppointmentId,
+            orderUserId,
+            orderClientId,
+            clientId,
+            userId,
+            orderId: serviceAppointment.order.id,
+          });
+          throw new BadRequestException('You can only review services from your own orders');
+        }
+      } else {
+        console.log('✅ [REVIEW] Order ownership verified by userId/clientId match');
+      }
+
+      // Check if status is cancelled or rejected
+      if (serviceAppointment.status?.toLowerCase() === 'cancelled' || 
+          serviceAppointment.status?.toLowerCase() === 'rejected') {
+        throw new BadRequestException('Cannot review cancelled or rejected service appointments');
+      }
+
+      // Try to find corresponding Appointment record
+      // When orders are created, an Appointment should exist, but if not, we'll create one
+      // Use a more efficient query with date range to avoid exact match issues
+      const appointmentDate = new Date(serviceAppointment.appointmentDate);
+      const startOfDay = new Date(appointmentDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(appointmentDate);
+      endOfDay.setHours(23, 59, 59, 999);
+      
+      let existingAppointment = await this.prisma.appointment.findFirst({
+        where: {
+          serviceId: serviceAppointment.serviceId,
+          clientId: clientId,
+          vendorId: serviceAppointment.vendorId,
+          appointmentDate: {
+            gte: startOfDay,
+            lte: endOfDay,
+          },
+        },
+      });
+
+      if (existingAppointment) {
+        finalAppointmentId = existingAppointment.id;
+        appointmentStatus = existingAppointment.status;
+      } else {
+        // Create an Appointment record if it doesn't exist
+        // This allows reviews from orders even if no Appointment was created during checkout
+        const startTime = new Date(serviceAppointment.appointmentDate);
+        const endTime = new Date(startTime.getTime() + serviceAppointment.durationMinutes * 60000);
+        
+        // Map status correctly
+        let appointmentStatusValue: 'pending' | 'confirmed' | 'completed' = 'pending';
+        const statusLower = serviceAppointment.status?.toLowerCase();
+        if (statusLower === 'confirmed') {
+          appointmentStatusValue = 'confirmed';
+        } else if (statusLower === 'completed') {
+          appointmentStatusValue = 'completed';
+        }
+        
+        existingAppointment = await this.prisma.appointment.create({
+          data: {
+            serviceId: serviceAppointment.serviceId,
+            clientId: clientId,
+            vendorId: serviceAppointment.vendorId,
+            staffId: serviceAppointment.staffId,
+            appointmentDate: serviceAppointment.appointmentDate,
+            startTime: startTime,
+            endTime: endTime,
+            durationMinutes: serviceAppointment.durationMinutes,
+            status: appointmentStatusValue,
+            totalAmount: serviceAppointment.servicePrice,
+            currency: serviceAppointment.currency,
+            notes: serviceAppointment.notes,
+          },
+        });
+        
+        finalAppointmentId = existingAppointment.id;
+        appointmentStatus = existingAppointment.status;
+      }
+    } else {
+      // Handle regular Appointment
+      const appointment = await this.prisma.appointment.findUnique({
+        where: { id: appointmentId! },
+      });
+
+      if (!appointment) {
+        throw new BadRequestException('Invalid appointment ID');
+      }
+
+      // Only block cancelled or rejected appointments
+      // Allow reviews for all other statuses (just like products)
+      if (appointment.status === 'cancelled' || appointment.status === 'rejected') {
+        throw new BadRequestException('Cannot review cancelled or rejected appointments');
+      }
+
+      // Check if client is the one who made the appointment
+      if (appointment.clientId !== clientId) {
+        throw new BadRequestException('You can only review your own appointments');
+      }
+
+      finalAppointmentId = appointmentId!;
+      appointmentStatus = appointment.status;
+    }
+
     // Check if review already exists for this appointment
     const existingReview = await this.prisma.serviceReview.findFirst({
       where: {
-        appointmentId,
+        appointmentId: finalAppointmentId,
         clientId,
       },
     });
@@ -199,20 +386,10 @@ export class ReviewsService {
       throw new BadRequestException('Review already exists for this appointment');
     }
 
-    // Check if appointment is completed
-    if (appointment.status !== 'completed') {
-      throw new BadRequestException('Can only review completed appointments');
-    }
-
-    // Check if client is the one who made the appointment
-    if (appointment.clientId !== clientId) {
-      throw new BadRequestException('You can only review your own appointments');
-    }
-
     const review = await this.prisma.serviceReview.create({
       data: {
         serviceId,
-        appointmentId,
+        appointmentId: finalAppointmentId,
         clientId,
         vendorId,
         staffId,
@@ -624,20 +801,13 @@ export class ReviewsService {
 
   /**
    * Verify if user has purchased the product
+   * Only checks if user has an order containing the product, regardless of order status
    */
   private async verifyProductPurchase(userId: string, productId: string): Promise<boolean> {
-    // Check regular orders
-    // Accept orders that have been paid (even if not yet completed/delivered)
-    // This allows users to review products after payment, not just after delivery
+    // Check regular orders - only verify user has an order with this product
     const orderWithProduct = await this.prisma.order.findFirst({
       where: {
         userId,
-        status: {
-          in: ['completed', 'delivered', 'confirmed', 'processing', 'paid'],
-        },
-        paymentStatus: {
-          in: ['completed', 'paid', 'processing', 'enterprise_pending'],
-        },
         orderItems: {
           some: {
             productId,
@@ -658,16 +828,11 @@ export class ReviewsService {
     }
 
     // Check manufacturer orders (for retailers ordering from manufacturers)
+    // Only verify retailer has an order with this product, regardless of status
     const manufacturerOrder = await this.prisma.manufacturerOrder.findFirst({
       where: {
         retailerId: userId,
         productId,
-        status: {
-          in: ['completed', 'delivered', 'processing'],
-        },
-        paymentStatus: {
-          in: ['paid', 'processing', 'enterprise_pending'],
-        },
       },
     });
 
@@ -782,6 +947,53 @@ export class ReviewsService {
     });
 
     return review;
+  }
+
+  /**
+   * Get product reviews by user ID
+   */
+  async getProductReviewsByUserId(userId: string, page: number = 1, limit: number = 10) {
+    const skip = (page - 1) * limit;
+
+    const [reviews, total] = await Promise.all([
+      this.prisma.review.findMany({
+        where: {
+          userId,
+          itemType: 'product',
+          isActive: true,
+        },
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              businessName: true,
+              email: true,
+            },
+          },
+        },
+      }),
+      this.prisma.review.count({
+        where: {
+          userId,
+          itemType: 'product',
+          isActive: true,
+        },
+      }),
+    ]);
+
+    return {
+      reviews,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    };
   }
 
   /**

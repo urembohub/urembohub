@@ -114,6 +114,8 @@ export class ProductCategoriesService {
   }
 
   async getActiveProductCategories() {
+    // Optimize query by removing nested relations that can be computed on frontend
+    // This reduces database connection pool usage
     return this.prisma.productCategory.findMany({
       where: { isActive: true },
       select: {
@@ -129,23 +131,8 @@ export class ProductCategoriesService {
         showOnHomepage: true,
         createdAt: true,
         updatedAt: true,
-        parent: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-          },
-        },
-        children: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-            level: true,
-            position: true,
-          },
-          orderBy: { position: "asc" },
-        },
+        // Removed parent and children relations to reduce query complexity
+        // Frontend can compute these relationships from the flat list
       },
       orderBy: [{ level: "asc" }, { position: "asc" }],
     })

@@ -11,10 +11,15 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
           url: configService?.get('DATABASE_URL') || process.env.DATABASE_URL,
         },
       },
+      log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
     });
   }
 
   async onModuleInit() {
     await this.$connect();
+  }
+
+  async onModuleDestroy() {
+    await this.$disconnect();
   }
 }

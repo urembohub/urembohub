@@ -1,11 +1,16 @@
-import { IsString, IsOptional, IsInt, Min, Max, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsInt, Min, Max, IsEnum, ValidateIf } from 'class-validator';
 
 export class CreateReviewDto {
   @IsString()
   serviceId: string;
 
+  @ValidateIf((o) => !o.serviceAppointmentId)
   @IsString()
-  appointmentId: string;
+  appointmentId?: string;
+
+  @ValidateIf((o) => !o.appointmentId)
+  @IsString()
+  serviceAppointmentId?: string;
 
   @IsString()
   clientId: string;
