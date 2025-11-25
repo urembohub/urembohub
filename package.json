@@ -25,7 +25,7 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "ts-node prisma/seed.ts",
     "db:seed:onboarding": "ts-node prisma/seed-onboarding.ts",
-    "db:seed:admin": "ts-node prisma/seed-admin.js",
+    "db:seed:admin": "ts-node prisma/seed-admin.ts",
     "db:seed:all": "ts-node prisma/seed-all.ts",
     "db:seed:test-data": "ts-node scripts/seed-test-data.ts",
     "check:manufacturer-stats": "ts-node src/scripts/check-manufacturer-stats.ts",
