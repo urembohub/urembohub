@@ -1096,9 +1096,27 @@ export class EscrowService {
       where.status = status;
     }
 
+    // Use select to explicitly exclude completionCode fields that may not exist in DB yet
     return await this.prisma.serviceEscrow.findMany({
       where,
-      include: {
+      select: {
+        id: true,
+        orderId: true,
+        serviceId: true,
+        vendorId: true,
+        customerId: true,
+        amount: true,
+        currency: true,
+        status: true,
+        paystackReference: true,
+        holdReference: true,
+        createdAt: true,
+        releasedAt: true,
+        autoReleaseDate: true,
+        disputeReason: true,
+        adminNotes: true,
+        createdBy: true,
+        updatedAt: true,
         service: true,
         vendor: {
           select: {
