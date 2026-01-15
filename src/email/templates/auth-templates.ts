@@ -47,6 +47,54 @@ export const getWelcomeTemplate = (userName: string) => {
   };
 };
 
+// Join waitlist template to welcome user.
+export const getWaitlistJoinTemplate = (fullName: string, businessName: string, role: string, email: string, message?: string) => {
+  const content = `
+    <div class="content-section">
+      <p class="text-body">Hi <strong>${fullName || 'there'}</strong>,</p>
+      <p class="text-body">Welcome to Urembo Hub! We're excited to have you join our waitlist and be part of the future of beauty in Kenya.</p>
+      <p class="text-body">As a ${role}, you'll be able to:</p>
+      <ul style="margin: 0; padding-left: 20px; color: hsl(var(--foreground));">
+        <li style="margin-bottom: 8px;">Sell beauty products directly to customers</li>
+        <li style="margin-bottom: 8px;">Book beauty services for your customers</li>
+        <li style="margin-bottom: 8px;">Access exclusive features and tools</li>
+        <li style="margin-bottom: 8px;">Get early access to new features</li>
+      </ul>
+      <p class="text-body">To explore how Urembo Hub is making Kenya smarter with beauty products and services, please visit our demo app:</p>
+      <div class="highlight-box">
+        <h3 style="margin: 0 0 12px 0; color: hsl(var(--primary)); font-size: 18px; font-weight: 600;">Next Steps</h3>
+        <ul style="margin: 0; padding-left: 20px; color: hsl(var(--foreground));">
+          <li style="margin-bottom: 8px;"><strong>Use your email:</strong> ${email}</li>
+          <li style="margin-bottom: 8px;"><strong>Password:</strong> (Same as your account password)</li>
+          <li style="margin-bottom: 8px;"><strong>Link:</strong> https://demo.urembohub.com</li>
+        </ul>
+      </div>
+      ${message ? `<p class="text-body">Message from us: ${message}</p>` : ''}
+      <p class="text-body">If you have any questions or need assistance, feel free to reach out to our support team. We're here to help you succeed!</p>
+    </div>
+  `;
+  return {
+    subject: `Welcome to Urembo Hub Waitlist, ${fullName || 'there'}!`,
+    html: generateBaseEmailHTML({
+      title: `Welcome to Urembo Hub Waitlist!`,
+      preheader: `Thank you for joining our waitlist. Explore our demo app to see how Urembo Hub is transforming beauty in Kenya.`,
+      content,
+      cta_button: {
+        text: 'Visit Demo App',
+        url: 'https://demo.urembohub.com',
+        style: 'primary'
+      },
+      variables: {
+        company_name: 'Urembo Hub',
+        support_email: 'support@urembohub.com',
+        base_url: 'https://urembohub.com',
+        logo_url: `${process.env.API_URL || process.env.BASE_URL || 'http://localhost:3001'}/uploads/assets/logo.png`
+      }
+    })
+  };
+};
+
+// Email verification template.
 export const getVerificationTemplate = (userName: string, verificationUrl: string) => {
   const content = `
     <div class="content-section">

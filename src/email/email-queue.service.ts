@@ -4,7 +4,7 @@ import { Queue } from 'bull';
 import { QUEUE_NAMES } from '../queue/queues.constant';
 
 export interface EmailJobData {
-  type: 'onboarding_submission' | 'onboarding_approval' | 'onboarding_rejection' | 'order_notification' | 'payment_notification';
+  type: 'onboarding_submission' | 'onboarding_approval' | 'onboarding_rejection' | 'order_notification' | 'payment_notification' | 'waitlist_signup';
   recipientEmail: string;
   recipientName?: string;
   data: any;
@@ -92,6 +92,25 @@ export class EmailQueueService {
       type: 'onboarding_rejection',
       recipientEmail: data.recipientEmail,
       recipientName: data.recipientName,
+      data,
+      priority: 2,
+    });
+  }
+
+  /**
+   * Add waitlist signup notification job
+   */
+  async addWaitlistSignupNotification(data: {
+    fullName: string;
+    businessName: string;
+    role: string;
+    email: string;
+    message?: string;
+  }): Promise<void> {
+    await this.addEmailJob({
+      type: 'waitlist_signup',
+      recipientEmail: data.email,
+      recipientName: data.fullName,
       data,
       priority: 2,
     });

@@ -7,6 +7,7 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { WaitlistSignupDto } from './dto/waitlist-signup.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -66,5 +67,10 @@ export class AuthController {
   @Post('resend-verification')
   async resendVerificationEmail(@Request() req) {
     return this.authService.resendVerificationEmail(req.user.sub);
+  }
+
+  @Post('waitlist-signup')
+  async waitlistSignup(@Body() signupData: WaitlistSignupDto) {
+    return this.authService.waitlistSignup(signupData);
   }
 }

@@ -23,6 +23,9 @@ export class EmailNotificationProcessor {
         case 'onboarding_submission':
           result = await this.handleOnboardingSubmission(data);
           break;
+        case 'waitlist_signup':
+          result = await this.handleWaitlistSignup(data);
+          break;
         case 'onboarding_approval':
           result = await this.handleOnboardingApproval(data);
           break;
@@ -100,6 +103,20 @@ export class EmailNotificationProcessor {
       data.recipientEmail,
       data.recipientName,
       data.rejectionReason
+    );
+  }
+
+  private async handleWaitlistSignup(data: {
+    fullName: string;
+    businessName: string;
+    role: string;
+    email: string;
+  }) {
+    return await this.emailService.sendWaitlistJoinEmail(
+      data.fullName,
+      data.businessName,
+      data.role,
+      data.email
     );
   }
 

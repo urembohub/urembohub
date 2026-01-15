@@ -12,6 +12,20 @@ services:
     command: redis-server --appendonly yes
     networks:
       - backend-network
+  db:
+    image: postgres:15-alpine
+    container_name: postgres-app
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: app_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - backend-network
 
   # NestJS Backend
   backend:
@@ -39,6 +53,7 @@ services:
 
 volumes:
   redis_data:
+  db_data:
 
 networks:
   backend-network:
