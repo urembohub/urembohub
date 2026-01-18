@@ -401,7 +401,7 @@ export class AuthService {
         role: (signupData.role as any) || "client",
         businessName: signupData.businessName,
         isVerified: true, // Auto-verify for waitlist signup
-        onboardingStatus: "pending",
+        onboardingStatus: "approved",
         // isWaitlist: true,
       },
     })

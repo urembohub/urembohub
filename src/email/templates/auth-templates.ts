@@ -7,7 +7,7 @@ import { generateBaseEmailHTML } from './base-template';
 
 export const getWelcomeTemplate = (userName: string) => {
   const content = `
-    <div class="content-section">
+    <div class="content-section" style="margin-bottom: 24px; background: hsl(var(--background)); padding: 20px; border-radius: 8px;">
       <p class="text-body">Welcome to Urembo Hub, <strong>${userName}</strong>! 🎉</p>
       
       <p class="text-body">We're thrilled to have you join our community of beauty professionals and customers. Your account has been successfully created and you're ready to start your journey with us.</p>
