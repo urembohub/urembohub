@@ -19,10 +19,8 @@ import { SubmitRequirementDto } from "./dto/submit-requirement.dto"
 import { ReviewSubmissionDto } from "./dto/review-submission.dto"
 import { BulkSubmitDto } from "./dto/bulk-submit.dto"
 import { 
-  SaveRequirementsStepDto, 
-  SaveBusinessInfoStepDto, 
+  SaveRequirementsStepDto,  
   SavePaymentDetailsStepDto, 
-  SaveDeliveryDetailsStepDto,
   StepDataResponseDto 
 } from "./dto/save-step.dto"
 
@@ -114,88 +112,6 @@ export class OnboardingService {
     })
   }
 
-  // Save delivery details directly to Profile table (mirrors savePaymentDetails pattern)
-  async saveDeliveryDetails(userId: string, deliveryDataJson: string) {
-    try {
-      const deliveryData = JSON.parse(deliveryDataJson)
-      console.log("🚚 Saving delivery details to Profile:", {
-        userId,
-        deliveryData,
-      })
-
-      // First check if profile exists
-      const existingProfile = await this.prisma.profile.findUnique({
-        where: { id: userId },
-        select: {
-          id: true,
-          deliveryMethod: true,
-          deliveryDetails: true,
-        },
-      })
-
-      console.log("🔍 Existing profile before update:", existingProfile)
-
-      const updatedProfile = await this.prisma.profile.update({
-        where: { id: userId },
-        data: {
-          deliveryMethod: deliveryData.deliveryMethod,
-          deliveryDetails: deliveryData,
-          deliveryDetailsVerified: false, // Reset verification when details change
-        },
-      })
-
-      console.log("✅ Delivery details saved successfully:", {
-        id: updatedProfile.id,
-        deliveryMethod: updatedProfile.deliveryMethod,
-        deliveryDetails: updatedProfile.deliveryDetails,
-      })
-
-      // Create a mock submission for consistency with the frontend
-      // Flatten the delivery data structure to match frontend expectations
-      const deliveryDetails = deliveryData.deliveryDetails as any || {}
-      
-      // Check if data is already flattened (has areaId, agentId, etc. at top level)
-      const isAlreadyFlattened = deliveryDetails.areaId || deliveryDetails.agentId || deliveryDetails.areaName
-      
-      let flattenedDeliveryData
-      if (isAlreadyFlattened) {
-        // Data is already flattened, use as is
-        flattenedDeliveryData = {
-          deliveryMethod: deliveryData.deliveryMethod,
-          ...deliveryDetails
-        }
-      } else {
-        // Data is double-nested, extract from nested deliveryDetails
-        const nestedDetails = deliveryDetails.deliveryDetails || {}
-        flattenedDeliveryData = {
-          deliveryMethod: deliveryData.deliveryMethod,
-          ...nestedDetails
-        }
-      }
-      
-      const mockSubmission = {
-        id: "delivery_details_" + Date.now(),
-        userId,
-        requirementId: "delivery_details",
-        value: JSON.stringify(flattenedDeliveryData),
-        fileUrl: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        requirement: {
-          id: "delivery_details",
-          label: "Delivery Details",
-          fieldType: "delivery_details",
-          isMandatory: false,
-        },
-      }
-
-      return mockSubmission
-    } catch (error) {
-      console.error("❌ Failed to save delivery details:", error)
-      throw new Error("Failed to save delivery details: " + error.message)
-    }
-  }
-
   // Save payment details directly to Profile table
   async savePaymentDetails(userId: string, paymentDataJson: string) {
     try {
@@ -271,13 +187,6 @@ export class OnboardingService {
       console.log("💳 Payment details detected, calling savePaymentDetails")
       return this.savePaymentDetails(userId, submitRequirementDto.value)
     }
-
-    // Special handling for delivery details - save to OnboardingSubmission with special ID
-    if (submitRequirementDto.requirementId === "delivery_details") {
-      console.log("🚚 Delivery details detected, saving to submissions")
-      return this.saveDeliveryDetails(userId, submitRequirementDto.value)
-    }
-
     // Verify requirement exists and is active
     const requirement = await this.prisma.onboardingRequirement.findFirst({
       where: {
@@ -362,14 +271,9 @@ export class OnboardingService {
         select: { 
           onboardingStatus: true, 
           role: true,
-          businessName: true,
-          businessPhone: true,
-          pickupMtaaniBusinessDetails: true,
-          paymentAccountType: true,
           paymentAccountDetails: true,
+          paymentAccountType: true,
           paystackSubaccountId: true,
-          deliveryMethod: true,
-          deliveryDetails: true
         },
       })
 
@@ -536,86 +440,6 @@ export class OnboardingService {
           accountDetails: profile?.paymentAccountDetails,
         }
       )
-    }
-
-    // Get delivery details from Profile table (mirrors payment details pattern)
-    const deliveryProfile = await this.prisma.profile.findUnique({
-      where: { id: userId },
-      select: {
-        deliveryMethod: true,
-        deliveryDetails: true,
-        deliveryDetailsVerified: true,
-      },
-    })
-
-    console.log("🚚 Backend: Profile delivery details:", deliveryProfile)
-
-    // Add delivery details as a submission if they exist
-    if (deliveryProfile?.deliveryMethod && deliveryProfile?.deliveryDetails) {
-      console.log(
-        "🚚 Backend: Creating delivery submission with data:",
-        deliveryProfile.deliveryDetails
-      )
-
-      // Flatten the delivery data structure to match frontend expectations
-      const deliveryDetails = deliveryProfile.deliveryDetails as any || {}
-      console.log("🚚 Backend: Raw delivery details from profile:", deliveryDetails)
-      
-      // Check if data is already flattened (has areaId, agentId, etc. at top level)
-      const isAlreadyFlattened = deliveryDetails.areaId || deliveryDetails.agentId || deliveryDetails.areaName
-      
-      let flattenedDeliveryData
-      if (isAlreadyFlattened) {
-        // Data is already flattened, use as is
-        flattenedDeliveryData = {
-          deliveryMethod: deliveryProfile.deliveryMethod,
-          ...deliveryDetails
-        }
-      } else {
-        // Data is double-nested, extract from nested deliveryDetails
-        const nestedDetails = deliveryDetails.deliveryDetails || {}
-        flattenedDeliveryData = {
-          deliveryMethod: deliveryProfile.deliveryMethod,
-          ...nestedDetails
-        }
-      }
-      
-      console.log("🚚 Backend: Flattened delivery data:", flattenedDeliveryData)
-
-      const deliverySubmission = {
-        id: "delivery_details_" + userId,
-        userId,
-        requirementId: "delivery_details",
-        value: JSON.stringify(flattenedDeliveryData),
-        fileUrl: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        requirement: {
-          id: "delivery_details",
-          role: "retailer" as any,
-          label: "Delivery Details",
-          fieldType: "delivery_details" as any,
-          isMandatory: false,
-          description: "Delivery preferences for Pick Up Mtaani",
-          placeholder: "Select delivery preferences",
-          selectOptions: null,
-          position: 998,
-          isActive: true,
-          isPaymentRelated: false,
-          validationRules: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      }
-
-      // Add delivery submission to the array
-      submissions.unshift(deliverySubmission)
-      console.log(
-        "✅ Backend: Added delivery details submission from Profile. Total submissions now:",
-        submissions.length
-      )
-    } else {
-      console.log("❌ Backend: No delivery details found in Profile")
     }
 
     return submissions
@@ -1024,74 +848,29 @@ export class OnboardingService {
   async getUserHistory(userId: string) {
     return this.onboardingHistoryService.getUserHistory(userId);
   }
-
-  /**
-   * Save Pickup Mtaani business details to user profile
-   */
-  async getPickupMtaaniBusiness(userId: string) {
+  
+  async checkBusinessExists(userId: string) {
     try {
       const user = await this.prisma.profile.findUnique({
         where: { id: userId },
-        select: { pickupMtaaniBusinessDetails: true }
-      })
-
-      if (user?.pickupMtaaniBusinessDetails) {
-        return {
-          success: true,
-          data: user.pickupMtaaniBusinessDetails
-        }
-      }
-
-      return {
-        success: true,
-        data: null
-      }
-    } catch (error) {
-      console.error('Error getting Pickup Mtaani business details:', error)
-      return {
-        success: false,
-        error: 'Failed to get business details'
-      }
-    }
-  }
-
-  async savePickupMtaaniBusiness(userId: string, businessData: {
-    businessId: number
-    businessName: string
-    phoneNumber: string
-    categoryId: number
-    categoryName: string
-  }) {
-    try {
-      // Update user profile with Pickup Mtaani business details
-      const updatedUser = await this.prisma.profile.update({
-        where: { id: userId },
-        data: {
-          pickupMtaaniBusinessDetails: {
-            id: businessData.businessId,
-            name: businessData.businessName,
-            phoneNumber: businessData.phoneNumber,
-            categoryId: businessData.categoryId,
-            categoryName: businessData.categoryName,
-            createdAt: new Date().toISOString(),
-          }
+        select: { 
+          businessName: true,
+          businessPhone: true
         }
       })
 
       return {
-        success: true,
-        data: updatedUser
+        exists: !!user?.businessName && !!user?.businessPhone
       }
     } catch (error) {
-      console.error('Error saving Pickup Mtaani business details:', error)
+      console.error('Error checking business existence:', error)
       return {
-        success: false,
-        error: 'Failed to save business details'
+        exists: false
       }
     }
   }
 
-  /**
+    /**
    * Get onboarding settings
    */
   async getOnboardingSettings() {
@@ -1152,54 +931,6 @@ export class OnboardingService {
   }
 
   /**
-   * Validate retailer's Pickup Mtaani business ID
-   * @param userProfile User profile data
-   * @returns Validation result with business ID or error message
-   */
-  private validateRetailerBusinessId(userProfile: any): { valid: boolean; businessId?: string; error?: string } {
-    try {
-      // Check if pickupMtaaniBusinessDetails exists
-      if (!userProfile.pickupMtaaniBusinessDetails) {
-        return {
-          valid: false,
-          error: 'Retailer has not completed Pickup Mtaani business setup'
-        }
-      }
-
-      const businessDetails = userProfile.pickupMtaaniBusinessDetails
-      
-      // Check for businessId or id field
-      const businessId = businessDetails.businessId || businessDetails.id
-      
-      if (!businessId) {
-        return {
-          valid: false,
-          error: 'Pickup Mtaani business ID not found in retailer profile'
-        }
-      }
-
-      // Validate business ID format (should be a number)
-      if (typeof businessId !== 'number' && !/^\d+$/.test(String(businessId))) {
-        return {
-          valid: false,
-          error: 'Invalid Pickup Mtaani business ID format'
-        }
-      }
-
-      return {
-        valid: true,
-        businessId: String(businessId)
-      }
-    } catch (error) {
-      console.error('Error validating retailer business ID:', error)
-      return {
-        valid: false,
-        error: 'Error validating Pickup Mtaani business ID'
-      }
-    }
-  }
-
-  /**
    * Comprehensive validation of complete onboarding
    */
   private async validateCompleteOnboarding(userId: string, userProfile: any): Promise<{ isValid: boolean; errors: string[] }> {
@@ -1238,32 +969,7 @@ export class OnboardingService {
       }
       if (!userProfile.paystackSubaccountId) {
         errors.push('Paystack sub-account must be created')
-      }
-
-      // 3. Validate retailer-specific requirements
-      if (userProfile.role === 'retailer') {
-        // Business information
-        if (!userProfile.businessName) {
-          errors.push('Business name is required for retailers')
-        }
-        if (!userProfile.businessPhone) {
-          errors.push('Business phone is required for retailers')
-        }
-
-        // Pickup Mtaani business ID
-        const businessIdValidation = this.validateRetailerBusinessId(userProfile)
-        if (!businessIdValidation.valid) {
-          errors.push(businessIdValidation.error || 'Pickup Mtaani business setup is incomplete')
-        }
-
-        // Delivery details
-        if (!userProfile.deliveryMethod) {
-          errors.push('Delivery method is required for retailers')
-        }
-        if (!userProfile.deliveryDetails || Object.keys(userProfile.deliveryDetails).length === 0) {
-          errors.push('Delivery details are required for retailers')
-        }
-      }
+      }     
 
       console.log(`🔍 [VALIDATION] Validation complete for user ${userId}:`, {
         isValid: errors.length === 0,
@@ -1339,35 +1045,6 @@ export class OnboardingService {
     }
   }
 
-  async saveBusinessInfoStep(userId: string, dto: SaveBusinessInfoStepDto) {
-    try {
-      console.log(`💾 [STEP] Saving business info step for user ${userId}`)
-      
-      const businessDetails = {
-        businessId: dto.pickupMtaaniBusinessId,
-        businessName: dto.pickupMtaaniBusinessName,
-        categoryId: dto.categoryId,
-        categoryName: dto.categoryName,
-        phoneNumber: dto.phoneNumber
-      }
-      
-      const updatedUser = await this.prisma.profile.update({
-        where: { id: userId },
-        data: {
-          businessName: dto.businessName,
-          businessPhone: dto.phoneNumber,
-          pickupMtaaniBusinessDetails: businessDetails
-        }
-      })
-      
-      console.log(`✅ [STEP] Business info step saved for user ${userId}`)
-      return { success: true, data: updatedUser }
-    } catch (error) {
-      console.error('❌ [STEP] Error saving business info step:', error)
-      throw error
-    }
-  }
-
   async savePaymentDetailsStep(userId: string, dto: SavePaymentDetailsStepDto) {
     try {
       console.log(`💾 [STEP] Saving payment details step for user ${userId}`)
@@ -1389,26 +1066,6 @@ export class OnboardingService {
     }
   }
 
-  async saveDeliveryDetailsStep(userId: string, dto: SaveDeliveryDetailsStepDto) {
-    try {
-      console.log(`💾 [STEP] Saving delivery details step for user ${userId}`)
-      
-      const updatedUser = await this.prisma.profile.update({
-        where: { id: userId },
-        data: {
-          deliveryMethod: dto.deliveryMethod,
-          deliveryDetails: dto.deliveryDetails
-        }
-      })
-      
-      console.log(`✅ [STEP] Delivery details step saved for user ${userId}`)
-      return { success: true, data: updatedUser }
-    } catch (error) {
-      console.error('❌ [STEP] Error saving delivery details step:', error)
-      throw error
-    }
-  }
-
   async getAllStepData(userId: string): Promise<StepDataResponseDto> {
     try {
       console.log(`📋 [STEP] Fetching all step data for user ${userId}`)
@@ -1418,14 +1075,9 @@ export class OnboardingService {
         where: { id: userId },
         select: {
           role: true,
-          businessName: true,
-          businessPhone: true,
-          pickupMtaaniBusinessDetails: true,
           paymentAccountType: true,
           paymentAccountDetails: true,
           paystackSubaccountId: true,
-          deliveryMethod: true,
-          deliveryDetails: true
         }
       })
 
@@ -1457,32 +1109,12 @@ export class OnboardingService {
       if (hasRequirements) {
         response.completedSteps.push(1)
       }
-
-      // Business info step (retailers only)
-      if (profile.role === 'retailer') {
-        const businessDetails = profile.pickupMtaaniBusinessDetails as any
-        const hasBusinessInfo = profile.businessName && 
-          profile.businessPhone && 
-          businessDetails?.businessId
-        if (hasBusinessInfo) {
-          response.completedSteps.push(2)
-          response.businessInfo = {
-            businessName: profile.businessName,
-            phoneNumber: profile.businessPhone,
-            categoryId: businessDetails?.categoryId || 0,
-            categoryName: businessDetails?.categoryName || '',
-            pickupMtaaniBusinessId: businessDetails?.businessId,
-            pickupMtaaniBusinessName: businessDetails?.businessName
-          }
-        }
-      }
-
-      // Payment details step
+     // Payment details step
       const hasPaymentDetails = profile.paymentAccountType && 
         profile.paymentAccountDetails && 
         profile.paystackSubaccountId
       if (hasPaymentDetails) {
-        const paymentStep = profile.role === 'retailer' ? 3 : 2
+        const paymentStep = 2
         response.completedSteps.push(paymentStep)
         response.paymentDetails = {
           paymentAccountType: profile.paymentAccountType,
@@ -1491,20 +1123,8 @@ export class OnboardingService {
         }
       }
 
-      // Delivery details step (retailers only)
-      if (profile.role === 'retailer') {
-        const hasDeliveryDetails = profile.deliveryMethod && profile.deliveryDetails
-        if (hasDeliveryDetails) {
-          response.completedSteps.push(4)
-          response.deliveryDetails = {
-            deliveryMethod: profile.deliveryMethod,
-            deliveryDetails: profile.deliveryDetails
-          }
-        }
-      }
-
       // Determine current step
-      const totalSteps = profile.role === 'retailer' ? 5 : 3
+      const totalSteps = 3
       response.currentStep = Math.min(response.completedSteps.length + 1, totalSteps)
 
       console.log(`✅ [STEP] Step data fetched for user ${userId}:`, {
