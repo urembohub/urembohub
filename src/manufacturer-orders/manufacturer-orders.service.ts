@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Prisma, user_role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateManufacturerOrderDto } from './dto/create-manufacturer-order.dto';
 import { UpdateManufacturerOrderDto } from './dto/update-manufacturer-order.dto';
@@ -198,12 +199,12 @@ export class ManufacturerOrdersService {
     const taxAmount = (taxableAmount * tax) / 100;
     const totalAmount = taxableAmount + taxAmount + shippingCost;
 
-    console.log('📦 [CREATE_ORDER] Order creation details:');
-    console.log('📦 [CREATE_ORDER]   - Subtotal:', subtotal);
-    console.log('📦 [CREATE_ORDER]   - Discount:', discountAmount);
-    console.log('📦 [CREATE_ORDER]   - Tax:', taxAmount);
-    console.log('📦 [CREATE_ORDER]   - Shipping Cost:', shippingCost);
-    console.log('📦 [CREATE_ORDER]   - Total Amount:', totalAmount);
+    console.log(' [CREATE_ORDER] Order creation details:');
+    console.log(' [CREATE_ORDER]   - Subtotal:', subtotal);
+    console.log(' [CREATE_ORDER]   - Discount:', discountAmount);
+    console.log(' [CREATE_ORDER]   - Tax:', taxAmount);
+    console.log(' [CREATE_ORDER]   - Shipping Cost:', shippingCost);
+    console.log(' [CREATE_ORDER]   - Total Amount:', totalAmount);
 
     const order = await this.prisma.manufacturerOrder.create({
       data: {
@@ -269,6 +270,13 @@ export class ManufacturerOrdersService {
     if (userRole !== 'admin' && order.manufacturerId !== userId && order.retailerId !== userId) {
       throw new ForbiddenException('You can only update your own orders');
     }
+    if (updateOrderDto.status && order.retailerId === userId && userRole !== 'admin') {
+      throw new ForbiddenException('Retailers cannot change order status directly. Use mark-received for delivered items.');
+    }
+
+    if (updateOrderDto.status === 'received' && order.manufacturerId === userId && userRole !== 'admin') {
+      throw new ForbiddenException('Manufacturers cannot mark orders as received. Only the retailer can confirm receipt.');
+    }
 
     // If manufacturer is updating, they can update status, tracking, etc.
     // If retailer is updating, they can update notes, addresses, etc.
@@ -309,17 +317,25 @@ export class ManufacturerOrdersService {
       const taxAmount = (taxableAmount * Number(newTax)) / 100;
       const totalAmount = taxableAmount + taxAmount + Number(newShippingCost);
 
-      console.log('📦 [UPDATE_ORDER] Recalculating totals:');
-      console.log('📦 [UPDATE_ORDER]   - Subtotal:', subtotal);
-      console.log('📦 [UPDATE_ORDER]   - Discount:', discountAmount);
-      console.log('📦 [UPDATE_ORDER]   - Tax:', taxAmount);
-      console.log('📦 [UPDATE_ORDER]   - Shipping Cost:', newShippingCost);
-      console.log('📦 [UPDATE_ORDER]   - Total Amount:', totalAmount);
+      console.log(' [UPDATE_ORDER] Recalculating totals:');
+      console.log(' [UPDATE_ORDER]   - Subtotal:', subtotal);
+      console.log(' [UPDATE_ORDER]   - Discount:', discountAmount);
+      console.log(' [UPDATE_ORDER]   - Tax:', taxAmount);
+      console.log(' [UPDATE_ORDER]   - Shipping Cost:', newShippingCost);
+      console.log(' [UPDATE_ORDER]   - Total Amount:', totalAmount);
 
       allowedUpdates.subtotal = subtotal;
       allowedUpdates.discountAmount = discountAmount;
       allowedUpdates.taxAmount = taxAmount;
       allowedUpdates.totalAmount = totalAmount;
+    }
+
+    if (allowedUpdates.status === 'delivered') {
+      return this.markDelivered(id, userId, userRole);
+    }
+
+    if (allowedUpdates.status === 'received') {
+      return this.markReceived(id, userId, userRole);
     }
 
     const updatedOrder = await this.prisma.manufacturerOrder.update({
@@ -363,8 +379,7 @@ export class ManufacturerOrdersService {
   }
 
   // Cancel manufacturer order
-  // Note: If order was already paid, stock was already reduced. 
-  // We should restore stock if cancelling a paid order.
+  // Stock is not adjusted on payment anymore; it is adjusted on explicit delivered/received actions.
   async cancelOrder(id: string, userId: string, userRole: string, reason?: string) {
     const order = await this.getOrderById(id);
 
@@ -374,42 +389,11 @@ export class ManufacturerOrdersService {
     }
 
     // Check if order can be cancelled
-    if (['shipped', 'delivered', 'cancelled'].includes(order.status)) {
+    if (['shipped', 'delivered', 'received', 'cancelled'].includes(order.status)) {
       throw new BadRequestException('Order cannot be cancelled in current status');
     }
 
-    // If order was paid, restore stock quantity
-    const wasPaid = order.paymentStatus === 'paid';
-    if (wasPaid) {
-      try {
-        const product = await this.prisma.product.findUnique({
-          where: { id: order.productId },
-          select: {
-            id: true,
-            stockQuantity: true,
-            name: true,
-          },
-        });
-
-        if (product) {
-          const currentStock = Number(product.stockQuantity);
-          const orderedQuantity = order.quantity;
-          const restoredStock = currentStock + orderedQuantity;
-
-          await this.prisma.product.update({
-            where: { id: product.id },
-            data: {
-              stockQuantity: restoredStock,
-            },
-          });
-
-          console.log(`✅ [CANCEL_ORDER] Stock restored for product ${product.name}: ${currentStock} → ${restoredStock} (restored: ${orderedQuantity})`);
-        }
-      } catch (stockError) {
-        console.error("❌ [CANCEL_ORDER] Error restoring product stock:", stockError);
-        // Don't fail the cancellation if stock restore fails, but log it
-      }
-    }
+    // Do not restore stock on cancel because stock is deducted on explicit delivery, not payment.
 
     const updatedOrder = await this.prisma.manufacturerOrder.update({
       where: { id },
@@ -686,11 +670,11 @@ export class ManufacturerOrdersService {
       currency: latestOrder.currency || 'KES',
     };
 
-    console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Initializing payment for order:', orderId);
-    console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Total Amount (KES):', Number(latestOrder.totalAmount));
-    console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Shipping Cost (KES):', Number(latestOrder.shippingCost || 0));
-    console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Amount (kobo):', paymentDto.amount);
-    console.log('💳 [MANUFACTURER_ORDER_PAYMENT] Currency:', paymentDto.currency);
+    console.log(' [MANUFACTURER_ORDER_PAYMENT] Initializing payment for order:', orderId);
+    console.log(' [MANUFACTURER_ORDER_PAYMENT] Total Amount (KES):', Number(latestOrder.totalAmount));
+    console.log(' [MANUFACTURER_ORDER_PAYMENT] Shipping Cost (KES):', Number(latestOrder.shippingCost || 0));
+    console.log(' [MANUFACTURER_ORDER_PAYMENT] Amount (kobo):', paymentDto.amount);
+    console.log(' [MANUFACTURER_ORDER_PAYMENT] Currency:', paymentDto.currency);
 
     // Initialize payment via Paystack
     const paymentResult = await this.paystackCheckoutService.initializePayment(paymentDto);
@@ -726,16 +710,308 @@ export class ManufacturerOrdersService {
     };
   }
 
+  async getRetailerPurchases(
+    retailerId: string,
+    page: number = 1,
+    limit: number = 10,
+    status?: string,
+    paymentStatus?: string,
+  ) {
+    const skip = (page - 1) * limit;
+    const where: any = { retailerId };
+
+    if (status) {
+      where.status = status;
+    }
+
+    if (paymentStatus) {
+      where.paymentStatus = paymentStatus;
+    }
+
+    const [orders, total, statusBuckets] = await Promise.all([
+      this.prisma.manufacturerOrder.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          manufacturer: {
+            select: {
+              id: true,
+              fullName: true,
+              businessName: true,
+              email: true,
+              phone: true,
+            },
+          },
+          product: {
+            select: {
+              id: true,
+              name: true,
+              description: true,
+              price: true,
+              currency: true,
+              imageUrl: true,
+              stockQuantity: true,
+              sku: true,
+            },
+          },
+        },
+      }),
+      this.prisma.manufacturerOrder.count({ where }),
+      this.prisma.manufacturerOrder.groupBy({
+        by: ['status'],
+        where: { retailerId },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const counts = statusBuckets.reduce((acc, item) => {
+      acc[item.status] = item._count._all;
+      return acc;
+    }, {} as Record<string, number>);
+
+    return {
+      orders,
+      statusCounts: {
+        all: Object.values(counts).reduce((sum, n) => sum + n, 0),
+        pending: counts.pending || 0,
+        confirmed: counts.confirmed || 0,
+        processing: counts.processing || 0,
+        shipped: counts.shipped || 0,
+        delivered: counts.delivered || 0,
+        received: counts.received || 0,
+        cancelled: counts.cancelled || 0,
+      },
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async markDelivered(id: string, userId: string, userRole: string) {
+    const order = await this.getOrderById(id);
+
+    if (userRole !== 'admin' && order.manufacturerId !== userId) {
+      throw new ForbiddenException('Only the manufacturer can mark this order as delivered');
+    }
+
+    if (order.status === 'cancelled') {
+      throw new BadRequestException('Cancelled orders cannot be delivered');
+    }
+
+    if (order.paymentStatus !== 'paid' && userRole !== 'admin') {
+      throw new BadRequestException('Order payment must be successful before delivery is confirmed');
+    }
+
+    const now = new Date();
+
+    await this.prisma.$transaction(async (tx) => {
+      const latestOrder = await tx.manufacturerOrder.findUnique({
+        where: { id },
+      });
+
+      if (!latestOrder) {
+        throw new NotFoundException('Manufacturer order not found');
+      }
+
+      if (!latestOrder.manufacturerStockDeductedAt) {
+        const sourceProduct = await tx.product.findUnique({
+          where: { id: latestOrder.productId },
+          select: {
+            id: true,
+            stockQuantity: true,
+            name: true,
+          },
+        });
+
+        if (!sourceProduct) {
+          throw new NotFoundException('Source manufacturer product not found');
+        }
+
+        if (sourceProduct.stockQuantity < latestOrder.quantity) {
+          throw new BadRequestException(
+            `Manufacturer stock is insufficient for ${sourceProduct.name}. Available: ${sourceProduct.stockQuantity}, required: ${latestOrder.quantity}`,
+          );
+        }
+
+        await tx.product.update({
+          where: { id: sourceProduct.id },
+          data: {
+            stockQuantity: {
+              decrement: latestOrder.quantity,
+            },
+          },
+        });
+      }
+
+      await tx.manufacturerOrder.update({
+        where: { id },
+        data: {
+          status: latestOrder.status === 'received' ? 'received' : 'delivered',
+          actualDeliveryDate: now,
+          manufacturerStockDeductedAt: latestOrder.manufacturerStockDeductedAt || now,
+        },
+      });
+    });
+
+    return this.getOrderById(id);
+  }
+
+  async markReceived(id: string, userId: string, userRole: string, notes?: string) {
+    const order = await this.getOrderById(id);
+
+    if (userRole !== 'admin' && order.retailerId !== userId) {
+      throw new ForbiddenException('Only the retailer can mark this order as received');
+    }
+
+    if (!['delivered', 'received'].includes(order.status)) {
+      throw new BadRequestException('Only delivered orders can be marked as received');
+    }
+
+    if (order.paymentStatus !== 'paid' && userRole !== 'admin') {
+      throw new BadRequestException('Order payment must be successful before receiving stock');
+    }
+
+    const now = new Date();
+
+    await this.prisma.$transaction(async (tx) => {
+      const latestOrder = await tx.manufacturerOrder.findUnique({
+        where: { id },
+        include: {
+          product: true,
+        },
+      });
+
+      if (!latestOrder) {
+        throw new NotFoundException('Manufacturer order not found');
+      }
+
+      let retailerProductId = latestOrder.retailerProductId || null;
+
+      if (!latestOrder.retailerStockAdjustedAt) {
+        const retailerProduct = await this.getOrCreateRetailerProductForPurchase(tx, latestOrder as any);
+        retailerProductId = retailerProduct.id;
+
+        await tx.product.update({
+          where: { id: retailerProduct.id },
+          data: {
+            stockQuantity: {
+              increment: latestOrder.quantity,
+            },
+          },
+        });
+      }
+
+      await tx.manufacturerOrder.update({
+        where: { id },
+        data: {
+          status: 'received',
+          retailerReceivedAt: now,
+          retailerStockAdjustedAt: latestOrder.retailerStockAdjustedAt || now,
+          retailerProductId,
+          notes: notes
+            ? `${latestOrder.notes || ''}\nRetailer receive note: ${notes}`.trim()
+            : latestOrder.notes,
+        },
+      });
+    });
+
+    return this.getOrderById(id);
+  }
+
+  private async getOrCreateRetailerProductForPurchase(
+    tx: Prisma.TransactionClient,
+    order: {
+      retailerId: string;
+      manufacturerId: string;
+      unitPrice: Prisma.Decimal;
+      retailerProductId: string | null;
+      product: {
+        name: string;
+        description: string | null;
+        currency: string;
+        imageUrl: string | null;
+        categoryId: string | null;
+        subcategoryId: string | null;
+        sku: string | null;
+        tags: string[];
+      };
+    },
+  ) {
+    if (order.retailerProductId) {
+      const linked = await tx.product.findFirst({
+        where: {
+          id: order.retailerProductId,
+          retailerId: order.retailerId,
+        },
+      });
+
+      if (linked) {
+        return linked;
+      }
+    }
+
+    const skuMatch = order.product.sku
+      ? await tx.product.findFirst({
+          where: {
+            retailerId: order.retailerId,
+            manufacturerId: order.manufacturerId,
+            sku: order.product.sku,
+          },
+        })
+      : null;
+
+    if (skuMatch) {
+      return skuMatch;
+    }
+
+    const nameMatch = await tx.product.findFirst({
+      where: {
+        retailerId: order.retailerId,
+        manufacturerId: order.manufacturerId,
+        name: {
+          equals: order.product.name,
+          mode: 'insensitive',
+        },
+      },
+    });
+
+    if (nameMatch) {
+      return nameMatch;
+    }
+
+    return tx.product.create({
+      data: {
+        name: order.product.name,
+        description: order.product.description,
+        price: order.unitPrice,
+        currency: order.product.currency,
+        stockQuantity: 0,
+        imageUrl: order.product.imageUrl,
+        categoryId: order.product.categoryId,
+        subcategoryId: order.product.subcategoryId,
+        retailerId: order.retailerId,
+        manufacturerId: order.manufacturerId,
+        sku: order.product.sku,
+        tags: order.product.tags || [],
+        createdByRole: user_role.retailer,
+      },
+    });
+  }
   // Calculate shipping cost BEFORE order creation (using product price and quantity)
   async calculateShippingBeforeOrder(
     manufacturerId: string,
     retailerId: string,
     packageValue: number
   ) {
-    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] calculateShippingBeforeOrder called');
-    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Manufacturer ID:', manufacturerId);
-    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Retailer ID:', retailerId);
-    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Package value:', packageValue);
+    console.log(' [MANUFACTURER_ORDER_SHIPPING] calculateShippingBeforeOrder called');
+    console.log(' [MANUFACTURER_ORDER_SHIPPING] Manufacturer ID:', manufacturerId);
+    console.log(' [MANUFACTURER_ORDER_SHIPPING] Retailer ID:', retailerId);
+    console.log(' [MANUFACTURER_ORDER_SHIPPING] Package value:', packageValue);
     // Get manufacturer delivery details (sender)
     const manufacturer = await this.prisma.profile.findUnique({
       where: { id: manufacturerId },
@@ -775,10 +1051,10 @@ export class ManufacturerOrdersService {
     // Calculate shipping using Pick Up Mtaani API
     const shippingCost = 0;
 
-    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Calculated shipping BEFORE order creation:');
-    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Package value:', packageValue);
-    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Shipping cost:', shippingCost);
-    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Delivery mode:', deliveryMode);
+    console.log(' [MANUFACTURER_ORDER_SHIPPING] Calculated shipping BEFORE order creation:');
+    console.log(' [MANUFACTURER_ORDER_SHIPPING] Package value:', packageValue);
+    console.log(' [MANUFACTURER_ORDER_SHIPPING] Shipping cost:', shippingCost);
+    console.log(' [MANUFACTURER_ORDER_SHIPPING] Delivery mode:', deliveryMode);
 
     return {
       shippingCost,
@@ -798,8 +1074,8 @@ export class ManufacturerOrdersService {
       Number(order.totalAmount)
     );
 
-    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Calculated shipping for order:', orderId);
-    console.log('📦 [MANUFACTURER_ORDER_SHIPPING] Shipping cost:', result.shippingCost);
+    console.log(' [MANUFACTURER_ORDER_SHIPPING] Calculated shipping for order:', orderId);
+    console.log(' [MANUFACTURER_ORDER_SHIPPING] Shipping cost:', result.shippingCost);
 
     return result;
   }

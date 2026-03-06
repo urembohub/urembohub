@@ -14,8 +14,8 @@ export class UpdateManufacturerOrderDto {
   notes?: string;
 
   @IsOptional()
-  @IsEnum(['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled'])
-  status?: 'pending' | 'confirmed' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
+  @IsEnum(['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'received', 'cancelled'])
+  status?: 'pending' | 'confirmed' | 'processing' | 'shipped' | 'delivered' | 'received' | 'cancelled';
 
   @IsOptional()
   @IsString()
@@ -74,3 +74,4 @@ export class UpdateManufacturerOrderDto {
   @IsString()
   requestedDeliveryDate?: string;
 }
+
