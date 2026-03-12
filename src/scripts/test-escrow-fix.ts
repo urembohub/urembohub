@@ -5,7 +5,6 @@ import { EmailService } from "../email/email.service"
 import { PaystackService } from "../paystack/paystack.service"
 import { EscrowService } from "../escrow/escrow.service"
 import { EnhancedCommissionService } from "../commission/enhanced-commission.service"
-import { PickupMtaaniService } from "../pickup-mtaani/pickup-mtaani.service"
 
 async function testEscrowFix() {
   try {
@@ -29,7 +28,6 @@ async function testEscrowFix() {
       scheduleReconciliation: async () => {},
       triggerManualReconciliation: async () => {},
     }
-    const pickupMtaaniService = new PickupMtaaniService(configService)
     const packageTrackingQueueService = {
       addPackageTrackingJob: async () => {},
       addMultiplePackageTrackingJobs: async () => {},
@@ -43,8 +41,6 @@ async function testEscrowFix() {
       emailService,
       enhancedCommissionService,
       commissionQueueService as any,
-      pickupMtaaniService,
-      packageTrackingQueueService
     )
 
     // Get a confirmed service order

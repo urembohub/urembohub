@@ -12,6 +12,7 @@ import { user_role } from "@prisma/client"
 import { LoginDto } from "./dto/login.dto"
 import { RegisterDto } from "./dto/register.dto"
 import * as bcrypt from "bcryptjs"
+import { WaitlistSignupDto } from "./dto/waitlist-signup.dto"
 
 @Injectable()
 export class AuthService {
@@ -253,10 +254,6 @@ export class AuthService {
         paymentAccountDetails: true,
         paymentAccountType: true,
         paymentDetailsVerified: true,
-        deliveryDetails: true,
-        deliveryMethod: true,
-        deliveryDetailsVerified: true,
-        pickupMtaaniBusinessDetails: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -376,5 +373,95 @@ export class AuthService {
     // 2. Send verification email
 
     return { message: "Verification email sent" }
+  }
+
+  async waitlistSignup(signupData: WaitlistSignupDto) {
+    // Check if user already exists
+    const existingUser = await this.prisma.profile.findUnique({
+      where: { email: signupData.email },
+    })
+
+    if (existingUser) {
+      throw new BadRequestException("User already exists")
+    }
+
+    // Hash password
+    const hashedPassword = await this.hashPassword(signupData.password)
+
+    // Create new user profile with verification status set to true
+    const user = await this.prisma.profile.create({
+      data: {
+        email: signupData.email,
+        password: hashedPassword,
+        fullName: signupData.fullName,
+        role: (signupData.role as any) || "client",
+        businessName: signupData.businessName,
+        isVerified: true, // Auto-verify for waitlist signup
+        onboardingStatus: "approved",
+        // isWaitlist: true,
+      },
+    })
+
+    // Generate payment details based on role
+    let paymentAccountType = "personal"
+    if (user.role === "vendor" || user.role === "retailer" || user.role === "manufacturer") {
+      paymentAccountType = "business"
+    }
+
+    // Update user with payment account type
+    const updatedUser = await this.prisma.profile.update({
+      where: { id: user.id },
+      data: {
+        paymentAccountType,
+      },
+    })
+
+    // Log the signup
+    console.log("🎉 [WAITLIST SIGNUP] User signed up successfully!")
+    console.log("📊 [WAITLIST SIGNUP] User data:", {
+      id: updatedUser.id,
+      email: updatedUser.email,
+      fullName: updatedUser.fullName,
+      role: updatedUser.role,
+      businessName: updatedUser.businessName,
+      isVerified: updatedUser.isVerified,
+      paymentAccountType: updatedUser.paymentAccountType,
+      onboardingStatus: updatedUser.onboardingStatus,
+      // isWaitlist: updatedUser.isWaitlist,
+    })
+
+    // send waitlist confirmation email
+    try {
+      const waitlistEmailResult = await this.emailService.sendWaitlistJoinEmail(
+        updatedUser.fullName || "User",
+        updatedUser.businessName || "N/A",
+        updatedUser.role || "client",
+        updatedUser.email
+      );
+      if (waitlistEmailResult.success) {
+        console.log("✅ [WAITLIST SIGNUP] Waitlist join email sent successfully!")
+        console.log("📧 [WAITLIST SIGNUP] Message ID:", waitlistEmailResult.messageId)
+      }else {
+        console.error("❌ [WAITLIST SIGNUP] Failed to send waitlist join email:", waitlistEmailResult.error);
+      }
+    } catch (error) {
+      console.error("❌ [WAITLIST SIGNUP] Failed to send waitlist join email:", error);
+    }
+
+    const payload = { email: updatedUser.email, sub: updatedUser.id, role: updatedUser.role }
+    return {
+      access_token: this.jwtService.sign(payload),
+      user: {
+        id: updatedUser.id,
+        email: updatedUser.email,
+        fullName: updatedUser.fullName,
+        role: updatedUser.role,
+        businessName: updatedUser.businessName,
+        isVerified: updatedUser.isVerified,
+        paymentAccountType: updatedUser.paymentAccountType,
+        onboardingStatus: updatedUser.onboardingStatus,
+        // isWaitlist: updatedUser.isWaitlist
+      },
+    }
   }
 }

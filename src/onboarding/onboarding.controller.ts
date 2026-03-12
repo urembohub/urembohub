@@ -19,9 +19,7 @@ import { ReviewSubmissionDto } from './dto/review-submission.dto';
 import { BulkSubmitDto } from './dto/bulk-submit.dto';
 import { 
   SaveRequirementsStepDto, 
-  SaveBusinessInfoStepDto, 
   SavePaymentDetailsStepDto, 
-  SaveDeliveryDetailsStepDto 
 } from './dto/save-step.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { user_role, onboarding_status } from '@prisma/client';
@@ -191,22 +189,6 @@ export class OnboardingController {
     return this.onboardingService.getRequirementsByRole(role);
   }
 
-  // Check if Pickup Mtaani business already exists
-  @UseGuards(JwtAuthGuard)
-  @Get('pickup-mtaani-business')
-  async getPickupMtaaniBusiness(@Request() req) {
-    const userId = req.user?.userId || req.user?.sub || req.user?.id;
-    return this.onboardingService.getPickupMtaaniBusiness(userId);
-  }
-
-  // Save Pickup Mtaani business details
-  @UseGuards(JwtAuthGuard)
-  @Post('pickup-mtaani-business')
-  async savePickupMtaaniBusiness(@Body() body: { businessData: any }, @Request() req) {
-    const userId = req.user?.userId || req.user?.sub || req.user?.id;
-    return this.onboardingService.savePickupMtaaniBusiness(userId, body.businessData);
-  }
-
   // Get onboarding settings
   @Get('settings')
   async getOnboardingSettings() {
@@ -229,14 +211,6 @@ export class OnboardingController {
     return this.onboardingService.savePaymentDetails(userId, body.paymentData);
   }
 
-  // Save delivery details to Profile table
-  @UseGuards(JwtAuthGuard)
-  @Post('delivery-details')
-  async saveDeliveryDetails(@Body() body: { deliveryData: string }, @Request() req) {
-    const userId = req.user?.userId || req.user?.sub || req.user?.id;
-    return this.onboardingService.saveDeliveryDetails(userId, body.deliveryData);
-  }
-
   // Reset onboarding status
   @UseGuards(JwtAuthGuard)
   @Put('reset-status')
@@ -254,24 +228,10 @@ export class OnboardingController {
   }
 
   @UseGuards(JwtAuthGuard)
-  @Post('step/business-info')
-  async saveBusinessInfoStep(@Body() dto: SaveBusinessInfoStepDto, @Request() req) {
-    const userId = req.user?.userId || req.user?.sub || req.user?.id;
-    return this.onboardingService.saveBusinessInfoStep(userId, dto);
-  }
-
-  @UseGuards(JwtAuthGuard)
   @Post('step/payment-details')
   async savePaymentDetailsStep(@Body() dto: SavePaymentDetailsStepDto, @Request() req) {
     const userId = req.user?.userId || req.user?.sub || req.user?.id;
     return this.onboardingService.savePaymentDetailsStep(userId, dto);
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Post('step/delivery-details')
-  async saveDeliveryDetailsStep(@Body() dto: SaveDeliveryDetailsStepDto, @Request() req) {
-    const userId = req.user?.userId || req.user?.sub || req.user?.id;
-    return this.onboardingService.saveDeliveryDetailsStep(userId, dto);
   }
 
   @UseGuards(JwtAuthGuard)

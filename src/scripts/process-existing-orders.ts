@@ -5,7 +5,6 @@ import { EmailService } from "../email/email.service"
 import { PaystackService } from "../paystack/paystack.service"
 import { EscrowService } from "../escrow/escrow.service"
 import { EnhancedCommissionService } from "../commission/enhanced-commission.service"
-import { PickupMtaaniService } from "../pickup-mtaani/pickup-mtaani.service"
 
 async function processExistingOrders() {
   try {
@@ -29,7 +28,6 @@ async function processExistingOrders() {
       scheduleReconciliation: async () => {},
       triggerManualReconciliation: async () => {},
     }
-    const pickupMtaaniService = new PickupMtaaniService(configService)
     const packageTrackingQueueService = {
       addPackageTrackingJob: async () => {},
       addMultiplePackageTrackingJobs: async () => {},
@@ -43,8 +41,6 @@ async function processExistingOrders() {
       emailService,
       enhancedCommissionService,
       commissionQueueService as any,
-      pickupMtaaniService,
-      packageTrackingQueueService
     )
 
     // Get all confirmed service orders that don't have escrows yet

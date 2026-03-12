@@ -8,7 +8,8 @@ import {
   getPasswordResetTemplate, 
   getPasswordChangedTemplate, 
   getSuspiciousLoginTemplate,
-  getPasswordResetOTPTemplate
+  getPasswordResetOTPTemplate,
+  getWaitlistJoinTemplate,
 } from './templates/auth-templates';
 import { 
   getAccountCreatedTemplate, 
@@ -130,6 +131,20 @@ export class EmailService {
     const template = getWelcomeTemplate(userName);
     return this.sendEmail({
       to: userEmail,
+      subject: template.subject,
+      html: template.html,
+    });
+  }
+
+  async sendWaitlistJoinEmail(    
+    fullName: string,
+    businessName: string,
+    role: string,
+    email: string,
+  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const template = getWaitlistJoinTemplate(fullName, businessName, role, email);
+    return this.sendEmail({
+      to: email,
       subject: template.subject,
       html: template.html,
     });

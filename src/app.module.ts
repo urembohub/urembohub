@@ -32,8 +32,6 @@ import { UploadModule } from "./upload/upload.module"
 import { PaystackModule } from "./paystack/paystack.module"
 import { AgoraModule } from "./agora/agora.module"
 import { SupabaseModule } from "./supabase/supabase.module"
-import { PickupMtaaniModule } from "./pickup-mtaani/pickup-mtaani.module"
-import { PackageTrackingQueueModule } from "./pickup-mtaani/package-tracking-queue.module"
 import { QueueModule } from "./queue/queue.module"
 import { CommissionQueueModule } from "./commission/queue/commission-queue.module"
 import { QueueBullBoardModule } from "./queue/bull-board.module"
@@ -73,8 +71,6 @@ import { VendorScheduleModule } from "./vendor-schedule/vendor-schedule.module"
     PaystackModule,
     AgoraModule,
     SupabaseModule,
-    PickupMtaaniModule,
-    PackageTrackingQueueModule,
     QueueModule,
     CommissionQueueModule,
     QueueBullBoardModule,

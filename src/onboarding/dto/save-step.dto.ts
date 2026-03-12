@@ -7,32 +7,6 @@ export class SaveRequirementsStepDto {
   requirements: Record<string, any>;
 }
 
-export class SaveBusinessInfoStepDto {
-  @IsNotEmpty()
-  @IsString()
-  businessName: string;
-
-  @IsNotEmpty()
-  @IsString()
-  phoneNumber: string;
-
-  @IsNotEmpty()
-  @IsNumber()
-  categoryId: number;
-
-  @IsNotEmpty()
-  @IsString()
-  categoryName: string;
-
-  @IsOptional()
-  @IsNumber()
-  pickupMtaaniBusinessId?: number;
-
-  @IsOptional()
-  @IsString()
-  pickupMtaaniBusinessName?: string;
-}
-
 export class SavePaymentDetailsStepDto {
   @IsNotEmpty()
   @IsString()
@@ -51,35 +25,13 @@ export class SavePaymentDetailsStepDto {
   paystackSubaccountCode?: string;
 }
 
-export class SaveDeliveryDetailsStepDto {
-  @IsNotEmpty()
-  @IsString()
-  deliveryMethod: string;
-
-  @IsNotEmpty()
-  @IsObject()
-  deliveryDetails: any;
-}
-
 export class StepDataResponseDto {
   requirements: Record<string, any>;
-  businessInfo?: {
-    businessName: string;
-    phoneNumber: string;
-    categoryId: number;
-    categoryName: string;
-    pickupMtaaniBusinessId?: number;
-    pickupMtaaniBusinessName?: string;
-  };
   paymentDetails?: {
     paymentAccountType: string;
     paymentAccountDetails: any;
     paystackSubaccountId?: string;
     paystackSubaccountCode?: string;
-  };
-  deliveryDetails?: {
-    deliveryMethod: string;
-    deliveryDetails: any;
   };
   completedSteps: number[];
   currentStep: number;

@@ -222,7 +222,6 @@ export class OrdersService {
                     fullName: true,
                     businessName: true,
                     deliveryDetails: true,
-                    pickupMtaaniBusinessDetails: true,
                   },
                 },
               },
@@ -240,32 +239,6 @@ export class OrdersService {
         },
       },
     });
-
-    // Immediately create Pick Up Mtaani packages
-    if (orderWithRelations && productItems.length > 0) {
-      console.log('📦 [DOORSTEP_PAYMENT] Creating Pick Up Mtaani packages immediately...');
-      try {
-        const packageResults = await this.paymentsService.createPickUpMtaaniPackages(orderWithRelations);
-        console.log(`📦 [DOORSTEP_PAYMENT] Package creation result:`, packageResults);
-        
-        // Update order status based on package creation results
-        if (packageResults.success && packageResults.totalPackages > 0) {
-          await this.prisma.order.update({
-            where: { id: order.id },
-            data: { 
-              status: packageResults.failedPackages.length === 0 ? 'processing' : 'pending',
-              packageStatus: packageResults.failedPackages.length === 0 ? 'created' : 'partial',
-            },
-          });
-          
-          // Give a small delay to ensure packages are fully saved to database
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-      } catch (error) {
-        console.error('❌ [DOORSTEP_PAYMENT] Failed to create packages:', error);
-        // Don't fail order creation if package creation fails
-      }
-    }
 
     // Send "Order Received" email to customer (order is pending)
     try {
@@ -615,39 +588,9 @@ export class OrdersService {
       console.log('📋 [GET_USER_ORDERS] First order createdAt:', orders[0].createdAt);
       console.log('📋 [GET_USER_ORDERS] First order userId:', orders[0].userId);
       console.log('📋 [GET_USER_ORDERS] First order customerEmail:', orders[0].customerEmail);
-    }
+    }    
 
-    // Transform orders to include package tracking data from shippingAddress
-    const transformedOrders = orders.map(order => {
-      const shippingAddress = order.shippingAddress as any;
-      const packages = shippingAddress?.pickupMtaaniPackages || [];
-      
-      // Get package data for this user's orders
-      const userPackages = packages.filter((pkg: any) => 
-        // Filter packages that belong to this order
-        // Support both: packages with orderId and legacy packages without orderId (if only one package exists)
-        pkg.orderId === order.id || (!pkg.orderId && packages.length === 1)
-      );
-
-      return {
-        ...order,
-        // Include package tracking fields for backward compatibility
-        packageStatus: order.packageStatus,
-        packageTrackingId: order.packageTrackingId,
-        packageReceiptNo: order.packageReceiptNo,
-        packageTrackingLink: order.packageTrackingLink,
-        packageTrackingHistory: order.packageTrackingHistory,
-        // Include all packages for this order
-        packages: userPackages,
-        // Keep original shippingAddress for compatibility
-        shippingAddress: {
-          ...shippingAddress,
-          pickupMtaaniPackages: packages,
-        },
-      };
-    });
-
-    return transformedOrders;
+    return orders;
   }
 
   async confirmOrder(id: string, userId: string, userRole: string) {
