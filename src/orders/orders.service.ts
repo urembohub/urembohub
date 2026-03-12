@@ -50,6 +50,26 @@ export class OrdersService {
     private paymentsService: PaymentsService,
   ) {}
 
+  private async generateOrderCode(): Promise<string> {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const length = 5 + Math.floor(Math.random() * 4);
+      const min = Math.pow(10, length - 1);
+      const max = Math.pow(10, length) - 1;
+      const code = Math.floor(min + Math.random() * (max - min + 1)).toString();
+
+      const existing = await this.prisma.order.findUnique({
+        where: { orderCode: code },
+        select: { id: true },
+      });
+
+      if (!existing) {
+        return code;
+      }
+    }
+
+    throw new Error('Failed to generate unique order code');
+  }
+
   async createOrder(userId: string | null, createOrderDto: CreateOrderDto) {
     const { cartItems, ...orderData } = createOrderDto;
 
@@ -71,6 +91,7 @@ export class OrdersService {
         userId,
         retailerId,
         vendorId,
+        orderCode: await this.generateOrderCode(),
       },
     });
 
@@ -163,6 +184,7 @@ export class OrdersService {
         userId,
         retailerId,
         vendorId,
+        orderCode: await this.generateOrderCode(),
         status: 'pending',
         paymentDueAtDoor: true,
         paymentStatus: 'pending',
@@ -1473,3 +1495,4 @@ export class OrdersService {
     }
   }
 }
+

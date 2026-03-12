@@ -152,6 +152,7 @@ model Service {
 
 model Order {
   id                     String                     @id @default(uuid())
+  orderCode           String?                    @unique @map("order_code")
   userId                 String?                    @map("user_id")
   clientId               String?                    @map("client_id")
   vendorId               String?                    @map("vendor_id")
@@ -989,6 +990,7 @@ model LiveSessionParticipant {
 
 model ManufacturerOrder {
   id                    String    @id @default(uuid())
+  orderCode             String?   @unique @map("order_code")
   retailerId            String    @map("retailer_id")
   manufacturerId        String    @map("manufacturer_id")
   productId             String    @map("product_id")
@@ -1274,3 +1276,4 @@ enum CommissionPaymentStatus {
   failed
   reversed
 }
+

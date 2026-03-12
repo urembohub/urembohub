@@ -19,7 +19,7 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
         with:
-          username: levyvyle
+          username: miniroot48
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
       - name: Build and Push Docker image
@@ -28,7 +28,7 @@ jobs:
           context: .
           push: true
           tags: |
-            levyvyle/urembo-back:latest
+            urembohub/urembo-back:latest
 
       - name: Deploy to Server
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -40,10 +40,10 @@ jobs:
           script: |
             docker stop urembo-back || true
             docker rm urembo-back || true
-            docker rmi -f levyvyle/urembo-back:latest || true
-            docker pull levyvyle/urembo-back:latest
+            docker rmi -f urembohub/urembo-back:latest || true
+            docker pull urembohub/urembo-back:latest
             docker run -d --name urembo-back --restart unless-stopped \
               -e DATABASE_URL=postgresql://urembo:urembohub@172.17.0.1:5432/urembo \
               -e JWT_SECRET=${{ secrets.JWT_SECRET }} \
               -p 3000:3000 \
-              levyvyle/urembo-back:latest
+              urembohub/urembo-back:latest
