@@ -28,7 +28,7 @@ jobs:
           context: .
           push: true
           tags: |
-            urembohub/urembo-back:latest
+            miniroot48/urembo-back:latest
 
       - name: Deploy to Server
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
