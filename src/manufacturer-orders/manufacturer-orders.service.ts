@@ -14,6 +14,26 @@ export class ManufacturerOrdersService {
     private configService: ConfigService,
   ) {}
 
+  private async generateOrderCode(): Promise<string> {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const length = 5 + Math.floor(Math.random() * 4);
+      const min = Math.pow(10, length - 1);
+      const max = Math.pow(10, length) - 1;
+      const code = Math.floor(min + Math.random() * (max - min + 1)).toString();
+
+      const existing = await this.prisma.manufacturerOrder.findUnique({
+        where: { orderCode: code },
+        select: { id: true },
+      });
+
+      if (!existing) {
+        return code;
+      }
+    }
+
+    throw new Error('Failed to generate unique order code');
+  }
+
   // Calculate reserved stock for a manufacturer product
   // Reserved stock = sum of quantities from orders with status: pending, approved, confirmed
   async calculateReservedStock(manufacturerProductId: string): Promise<number> {
@@ -211,6 +231,7 @@ export class ManufacturerOrdersService {
         retailerId,
         manufacturerId,
         productId,
+        orderCode: await this.generateOrderCode(),
         quantity,
         unitPrice,
         subtotal,
@@ -1080,3 +1101,4 @@ export class ManufacturerOrdersService {
     return result;
   }
 }
+

@@ -30,6 +30,26 @@ export class PaystackCheckoutService {
     }
   }
 
+  private async generateOrderCode(): Promise<string> {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const length = 5 + Math.floor(Math.random() * 4);
+      const min = Math.pow(10, length - 1);
+      const max = Math.pow(10, length) - 1;
+      const code = Math.floor(min + Math.random() * (max - min + 1)).toString();
+
+      const existing = await this.prisma.order.findUnique({
+        where: { orderCode: code },
+        select: { id: true },
+      });
+
+      if (!existing) {
+        return code;
+      }
+    }
+
+    throw new Error('Failed to generate unique order code');
+  }
+
   /**
    * Get the backend URL for callbacks/webhooks
    * Uses localhost in development, configured URL in production
@@ -201,6 +221,7 @@ export class PaystackCheckoutService {
         callback_url: `${this.getBackendUrl()}/api/paystack/checkout/webhook`,
         metadata: {
           orderId: order.id,
+          orderCode: order.orderCode,
           customerName: createPaymentDto.customerName || order.user?.fullName || order.customerEmail || 'Customer',
           customerPhone: createPaymentDto.customerPhone || order.user?.phone || order.customerPhone || '',
           commissionData: commissionData,
@@ -399,6 +420,7 @@ export class PaystackCheckoutService {
       ]);
 
       if (order) {
+        metadata.orderCode = order.orderCode;
         await this.prisma.order.update({
           where: { id: order.id },
           data: {
@@ -412,6 +434,7 @@ export class PaystackCheckoutService {
       }
 
       if (manufacturerOrder) {
+        metadata.orderCode = manufacturerOrder.orderCode;
         const manufacturerStatusUpdate: any = {
           paymentStatus: paymentData.status === 'success' ? 'paid' : 'failed',
           paidAt: paymentData.status === 'success' ? new Date() : null,
@@ -435,8 +458,10 @@ export class PaystackCheckoutService {
       } as any;
 
       if (order) {
+        metadata.orderCode = order.orderCode;
         metadata.order = {
           id: order.id,
+          orderCode: order.orderCode,
           status: order.status,
           totalAmount: order.totalAmount,
           currency: order.currency,
@@ -463,8 +488,10 @@ export class PaystackCheckoutService {
           })),
         };
       } else if (manufacturerOrder) {
+        metadata.orderCode = manufacturerOrder.orderCode;
         metadata.order = {
           id: manufacturerOrder.id,
+          orderCode: manufacturerOrder.orderCode,
           status: manufacturerOrder.status,
           totalAmount: manufacturerOrder.totalAmount,
           currency: manufacturerOrder.currency,
@@ -614,6 +641,8 @@ export class PaystackCheckoutService {
       const order = await this.prisma.order.create({
         data: {
           userId: user.id,
+
+          orderCode: await this.generateOrderCode(),
           retailerId: product.retailerId,
           totalAmount: createPaymentDto.amount,
           currency: 'KES',
@@ -672,6 +701,7 @@ export class PaystackCheckoutService {
         callback_url: `${this.getBackendUrl()}/api/paystack/checkout/webhook`,
         metadata: {
           orderId: order.id,
+          orderCode: order.orderCode,
           customerName: createPaymentDto.customerName || order.user?.fullName || order.customerEmail || 'Customer',
           customerPhone: createPaymentDto.customerPhone || order.user?.phone || order.customerPhone || '',
           commissionData: commissionData,
@@ -879,6 +909,8 @@ export class PaystackCheckoutService {
         const order = await this.prisma.order.create({
           data: {
             userId: user.id,
+
+            orderCode: await this.generateOrderCode(),
             totalAmount: createPaymentDto.amount,
             currency: createPaymentDto.currency || 'KES',
             status: 'pending',
@@ -917,6 +949,8 @@ export class PaystackCheckoutService {
       const order = await this.prisma.order.create({
         data: {
           userId: user.id,
+
+          orderCode: await this.generateOrderCode(),
           totalAmount: createPaymentDto.amount,
           currency: createPaymentDto.currency || 'KES',
           status: 'pending',
@@ -1094,6 +1128,7 @@ export class PaystackCheckoutService {
         metadata: {
           ...createPaymentDto.metadata,
           orderId: manufacturerOrder.id,
+          orderCode: manufacturerOrder.orderCode,
           orderType: 'manufacturer_order',
           retailerId: manufacturerOrder.retailer.id,
           manufacturerId: manufacturerOrder.manufacturer.id,
@@ -1599,3 +1634,5 @@ export class PaystackCheckoutService {
     }
   }
 }
+
+
