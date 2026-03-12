@@ -18,15 +18,7 @@ PICKUP_MTAANI_API_KEY=8XD70DT5lJTY5p6NEqTqhNyQAT6XIOJ4XjBny3QvpOFzLyRDZ8jYJsp23I
 PICKUP_MTAANI_BUSINESS_ID=60583
 PICKUP_MTAANI_BASE_URL=https://staging7.dev.pickupmtaani.com/api/v1
 ```
-
-### Variable Details:
-
-- **PICKUP_MTAANI_API_KEY**: Your Pick Up Mtaani API authentication key
-- **PICKUP_MTAANI_BUSINESS_ID**: Your business ID registered with Pick Up Mtaani
-- **PICKUP_MTAANI_BASE_URL**: API base URL (staging or production)
-
 ---
-
 ## 🔄 How It Works
 
 ### Automatic Package Creation Flow:
