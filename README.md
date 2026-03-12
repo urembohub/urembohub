@@ -2,7 +2,7 @@
 
 A comprehensive NestJS API for the Urembo Hub beauty services and e-commerce platform, migrated from Supabase with Prisma and PostgreSQL.
 
-## Features
+## Features Included
 
 - **Multi-role User Management**: Client, Vendor, Retailer, Manufacturer, Admin roles
 - **E-commerce**: Products, services, orders, and order management
