@@ -419,6 +419,11 @@ export class PaystackCheckoutService {
         }),
       ]);
 
+      const metadata = {
+        ...paymentData.metadata,
+        orderType: manufacturerOrder ? 'manufacturer_order' : (paymentData.metadata?.orderType || 'order'),
+      } as any;
+
       if (order) {
         metadata.orderCode = order.orderCode;
         await this.prisma.order.update({
@@ -450,12 +455,7 @@ export class PaystackCheckoutService {
         });
       }
 
-      this.logger.log(`Payment verified: ${paymentData.status}`);
-
-      const metadata = {
-        ...paymentData.metadata,
-        orderType: manufacturerOrder ? 'manufacturer_order' : (paymentData.metadata?.orderType || 'order'),
-      } as any;
+      this.logger.log(`Payment verified: ${paymentData.status}`); 
 
       if (order) {
         metadata.orderCode = order.orderCode;
