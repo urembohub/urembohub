@@ -40,10 +40,10 @@ jobs:
           script: |
             docker stop urembo-back || true
             docker rm urembo-back || true
-            docker rmi -f urembohub/urembo-back:latest || true
-            docker pull urembohub/urembo-back:latest
+            docker rmi -f miniroot48/urembo-back:latest || true
+            docker pull miniroot48/urembo-back:latest
             docker run -d --name urembo-back --restart unless-stopped \
               -e DATABASE_URL=postgresql://urembo:urembohub@172.17.0.1:5432/urembo \
               -e JWT_SECRET=${{ secrets.JWT_SECRET }} \
               -p 3000:3000 \
-              urembohub/urembo-back:latest
+              miniroot48/urembo-back:latest
