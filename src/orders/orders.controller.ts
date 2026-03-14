@@ -9,7 +9,8 @@ import {
   Query, 
   UseGuards, 
   Request,
-  Req
+  Req,
+  ForbiddenException
 } from '@nestjs/common';
 import { OrdersService, CreateOrderDto, UpdateOrderDto } from './orders.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -233,5 +234,18 @@ export class OrdersController {
       body.appointmentDate,
       body.notes
     );
+  }
+
+  @Post(':id/payment/initialize')
+  @UseGuards(JwtAuthGuard)
+  async initializePayment(@Param('id') id: string, @Request() req) {
+    // CHANGE: enforce owner/admin access for client orders
+    const order = await this.ordersService.getOrderById(id);
+    const isOwner = order.userId ? order.userId === req.user.sub : order.customerEmail === req.user.email;
+    if (req.user.role !== 'admin' && !isOwner) {
+      throw new ForbiddenException('You can only initialize payment for your own orders');
+    }
+
+    return this.ordersService.initializePayment(id);
   }
 }

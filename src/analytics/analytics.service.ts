@@ -468,11 +468,17 @@ export class AnalyticsService {
         where: {
           retailerId,
           OR: [
-            // Regular paid orders
+            // CHANGE: Paystack-paid orders
+            {
+              paymentStatus: 'paid',
+            } as any,
+            {
+              paystackReference: { not: null },
+            } as any,
+            // Legacy paid orders
             {
               paymentReference: { not: null },
-              paymentStatus: 'paid',
-            },
+            } as any,
             // Customer pays at door orders (created immediately, payment pending)
             {
               paymentDueAtDoor: true,
@@ -529,8 +535,11 @@ export class AnalyticsService {
         this.prisma.order.findMany({
           where: {
             retailerId,
-            paymentReference: { not: null },
-            paymentStatus: 'paid',
+            OR: [
+              { paymentStatus: 'paid' } as any,
+              { paystackReference: { not: null } } as any,
+              { paymentReference: { not: null } } as any,
+            ],
           },
           select: { userId: true },
           distinct: ['userId'],
@@ -540,8 +549,11 @@ export class AnalyticsService {
         this.prisma.order.findMany({
           where: {
             retailerId,
-            paymentReference: { not: null },
-            paymentStatus: 'paid',
+            OR: [
+              { paymentStatus: 'paid' } as any,
+              { paystackReference: { not: null } } as any,
+              { paymentReference: { not: null } } as any,
+            ],
             createdAt: {
               gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
             },

@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException,BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { PaymentsService } from '../payments/payments.service';
+import { PaystackCheckoutService } from '@/paystack/paystack-checkout.service';
 // Removed order_status and order_status_enhanced imports as we now use string status
 
 export interface CreateOrderDto {
@@ -12,6 +13,7 @@ export interface CreateOrderDto {
     price: number;
     quantity?: number;
     vendorId?: string;
+    retailerId?: string;
     staffId?: string;
     appointmentDate?: string;
     durationMinutes?: number;
@@ -48,6 +50,7 @@ export class OrdersService {
     private prisma: PrismaService,
     private emailService: EmailService,
     private paymentsService: PaymentsService,
+    private paystackCheckoutService: PaystackCheckoutService,
   ) {}
 
   private async generateOrderCode(): Promise<string> {
@@ -632,7 +635,9 @@ export class OrdersService {
     return this.prisma.order.update({
       where: { id },
       data: {
-        status: 'paid',
+        // CHANGE: align order status/payment status with Paystack success flow
+        status: 'confirmed',
+        paymentStatus: 'paid',
         paidAt: new Date(),
         confirmedAt: new Date(),
       },
@@ -807,14 +812,24 @@ export class OrdersService {
   async getOrderItemsByRetailerId(retailerId: string) {
     return this.prisma.orderItem.findMany({
       where: {
-        order: {
+        // CHANGE: match by product retailerId to avoid missing orders when order.retailerId is null
+        product: {
           retailerId: retailerId,
+        },
+        order: {
           OR: [
-            // Regular paid orders
+            // CHANGE: include Paystack-paid orders (reference stored on paystackReference)
             {
-              paymentReference: { not: null },
               paymentStatus: 'paid'
-            },
+            } as any,
+            // CHANGE: include Paystack-initialized orders even if pending
+            {
+              paystackReference: { not: null }
+            } as any,
+            // Legacy paid orders
+            {
+              paymentReference: { not: null }
+            } as any,
             // Customer pays at door orders (created immediately, payment pending)
             {
               paymentDueAtDoor: true
@@ -1493,6 +1508,82 @@ export class OrdersService {
       console.error('❌ [ORDER] Error getting retailerId from product:', error);
       return null;
     }
+  }
+
+  // Initialize payment for manufacturer order
+  async initializePayment(orderId: string) {
+    const order = await this.getOrderById(orderId);
+
+    if (order.paymentStatus === 'paid') {
+      throw new BadRequestException('Order is already paid');
+    }
+
+    if (order.status === 'cancelled') {
+      throw new BadRequestException('Cannot initialize payment for cancelled order');
+    }
+
+    // Get customer email for payment
+    const customer = await this.prisma.profile.findUnique({
+      where: { id: order.userId },
+      select: { email: true, fullName: true },
+    });
+
+    if (!customer?.email) {
+      throw new BadRequestException('Customer email not found');
+    }
+
+    // Fetch the latest order data to ensure we have the updated totalAmount (including shipping)
+    const latestOrder = await this.getOrderById(orderId);
+    
+    // Create payment DTO for Paystack
+    // Paystack expects amount in kobo (smallest currency unit), so multiply by 100
+    const totalAmountInKobo = Math.round(Number(latestOrder.totalAmount) * 100);
+    
+    const paymentDto = {
+      // CHANGE: use the real order ID so Paystack can find the order
+      orderId: orderId,
+      customerEmail: customer.email,
+      amount: totalAmountInKobo,
+      currency: latestOrder.currency || 'KES',
+    };
+
+    console.log(' [CUSTOMER_ORDER_PAYMENT] Initializing payment for order:', orderId);
+    console.log(' [CUSTOMER_ORDER_PAYMENT] Total Amount (KES):', Number(latestOrder.totalAmount));
+    console.log(' [CUSTOMER_ORDER_PAYMENT] Shipping Cost (KES):', 0);
+    console.log(' [CUSTOMER_ORDER_PAYMENT] Currency:', paymentDto.currency);
+
+    // Initialize payment via Paystack
+    const paymentResult = await this.paystackCheckoutService.initializePayment(paymentDto);
+
+    if (!paymentResult.success) {
+      const errorMessage = ('error' in paymentResult ? paymentResult.error : null) || 
+                          ('message' in paymentResult ? paymentResult.message : null) || 
+                          'Failed to initialize payment';
+      throw new BadRequestException(errorMessage);
+    }
+
+    // Type assertion: when success is true, data should exist
+    const successResult = paymentResult as { success: true; data: { reference: string; authorization_url: string; access_code: string } };
+    
+    if (!successResult.data) {
+      throw new BadRequestException('Payment initialization succeeded but no data returned');
+    }
+
+    // Update order with payment reference
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: {
+        paystackReference: successResult.data.reference,
+        // paymentStatus defaults to 'pending' in schema, so we don't need to set it explicitly
+      },
+    });
+
+    return {
+      success: true,
+      authorizationUrl: successResult.data.authorization_url,
+      reference: successResult.data.reference,
+      accessCode: successResult.data.access_code,
+    };
   }
 }
 

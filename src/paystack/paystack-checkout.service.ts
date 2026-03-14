@@ -50,6 +50,129 @@ export class PaystackCheckoutService {
     throw new Error('Failed to generate unique order code');
   }
 
+  private async generateManufacturerOrderCode(): Promise<string> {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const length = 5 + Math.floor(Math.random() * 4);
+      const min = Math.pow(10, length - 1);
+      const max = Math.pow(10, length) - 1;
+      const code = Math.floor(min + Math.random() * (max - min + 1)).toString();
+
+      const existing = await this.prisma.manufacturerOrder.findUnique({
+        where: { orderCode: code },
+        select: { id: true },
+      });
+
+      if (!existing) {
+        return code;
+      }
+    }
+
+    throw new Error('Failed to generate unique manufacturer order code');
+  }
+
+  // CHANGE: create a cart order for a specific retailer/vendor group
+  private async createCartOrderForGroup(params: {
+    userId: string;
+    customerEmail: string;
+    customerPhone?: string;
+    currency: string;
+    items: Array<{
+      type: 'product' | 'service';
+      id: string;
+      name: string;
+      price: number;
+      quantity?: number;
+      vendorId?: string;
+      staffId?: string;
+      appointmentDate?: string;
+      durationMinutes?: number;
+    }>;
+    retailerId?: string | null;
+    vendorId?: string | null;
+  }) {
+    const {
+      userId,
+      customerEmail,
+      customerPhone,
+      currency,
+      items,
+      retailerId,
+      vendorId,
+    } = params;
+
+    const totalAmount = items.reduce((sum, item) => {
+      const lineTotal = item.type === 'product'
+        ? item.price * (item.quantity || 1)
+        : item.price;
+      return sum + lineTotal;
+    }, 0);
+
+    const order = await this.prisma.order.create({
+      data: {
+        userId,
+        retailerId: retailerId || null,
+        vendorId: vendorId || null,
+        orderCode: await this.generateOrderCode(),
+        totalAmount,
+        currency,
+        status: 'pending',
+        customerEmail,
+        customerPhone,
+      },
+      include: {
+        user: {
+          select: {
+            email: true,
+            fullName: true,
+            phone: true,
+          },
+        },
+      },
+    });
+
+    const productItems = items.filter((item) => item.type === 'product');
+    const serviceItems = items.filter((item) => item.type === 'service');
+
+    if (productItems.length > 0) {
+      const orderItems = productItems.map((item) => ({
+        orderId: order.id,
+        productId: item.id,
+        quantity: item.quantity || 1,
+        unitPrice: item.price,
+        totalPrice: item.price * (item.quantity || 1),
+        currency,
+        title: item.name,
+        type: 'product',
+      }));
+
+      await this.prisma.orderItem.createMany({
+        data: orderItems,
+      });
+    }
+
+    if (serviceItems.length > 0) {
+      const serviceAppointments = serviceItems.map((item) => ({
+        orderId: order.id,
+        serviceId: item.id,
+        vendorId: item.vendorId!,
+        staffId: item.staffId,
+        appointmentDate: new Date(item.appointmentDate!),
+        durationMinutes: item.durationMinutes || 60,
+        servicePrice: item.price,
+        currency,
+        status: 'PENDING' as const,
+        notes: '',
+      }));
+
+      await this.prisma.serviceAppointment.createMany({
+        data: serviceAppointments,
+      });
+    }
+
+    return order;
+  }
+
+
   /**
    * Get the backend URL for callbacks/webhooks
    * Uses localhost in development, configured URL in production
@@ -85,7 +208,7 @@ export class PaystackCheckoutService {
       console.log(' [PAYSTACK_CHECKOUT] Order ID:', createPaymentDto.orderId);
       console.log(' [PAYSTACK_CHECKOUT] Customer Email:', createPaymentDto.customerEmail);
       console.log(' [PAYSTACK_CHECKOUT] Amount:', createPaymentDto.amount);
-      console.log(' [PAYSTACK_CHECKOUT] Currency:', createPaymentDto.currency);
+      console.log(' [PAYSTACK_CHECKOUT] Currency:', createPaymentDto.currency || 'KES');
 
       this.logger.log(`Initializing payment for order: ${createPaymentDto.orderId}`);
 
@@ -195,13 +318,28 @@ export class PaystackCheckoutService {
       if (isMultiVendor) {
         console.log(' [PAYSTACK_CHECKOUT] Using Payment Groups for multi-vendor order...');
         
+        let orderCode = order.orderCode;
+        if (!orderCode) {
+          orderCode = await this.generateOrderCode();
+          await this.prisma.order.update({
+            where: { id: order.id },
+            data: { orderCode },
+          });
+        }
+
         // Use Payment Groups for multi-vendor orders
         const paymentData = {
           amount: createPaymentDto.amount,
           currency: createPaymentDto.currency,
           email: createPaymentDto.customerEmail || order.user?.email || order.customerEmail,
-          reference: createPaymentDto.reference,
-          metadata: createPaymentDto.metadata
+          customerName: createPaymentDto.customerName || order.user?.fullName,
+          customerPhone: createPaymentDto.customerPhone,
+          reference: orderCode,
+          metadata: {
+            ...(createPaymentDto.metadata || {}),
+            orderId: order.id,
+            orderCode: orderCode,
+          }
         };
 
         return await this.paymentsService.processPayment(createPaymentDto.orderId, paymentData);
@@ -213,15 +351,24 @@ export class PaystackCheckoutService {
       commissionData = await this.calculateCommission(order);
       
       // Prepare Paystack payment data
+      let orderCode = order.orderCode;
+      if (!orderCode) {
+        orderCode = await this.generateOrderCode();
+        await this.prisma.order.update({
+          where: { id: order.id },
+          data: { orderCode },
+        });
+      }
+
       const paymentData: any = {
         email: createPaymentDto.customerEmail || order.user?.email || order.customerEmail,
         amount: Math.round(createPaymentDto.amount * 100), // Convert to kobo
         currency: 'KES',
-        reference: `WKS_${Date.now()}_${order.id}`,
-        callback_url: `${this.getBackendUrl()}/api/paystack/checkout/webhook`,
+        reference: orderCode,
+        // CHANGE: remove callback_url to use Paystack dashboard redirect URL
         metadata: {
           orderId: order.id,
-          orderCode: order.orderCode,
+          orderCode: orderCode,
           customerName: createPaymentDto.customerName || order.user?.fullName || order.customerEmail || 'Customer',
           customerPhone: createPaymentDto.customerPhone || order.user?.phone || order.customerPhone || '',
           commissionData: commissionData,
@@ -366,8 +513,8 @@ export class PaystackCheckoutService {
 
       const paymentData = response.data.data;
 
-      const [order, manufacturerOrder] = await Promise.all([
-        this.prisma.order.findFirst({
+      const [ordersByReference, manufacturerOrder] = await Promise.all([
+        this.prisma.order.findMany({
           where: { paystackReference: reference },
           include: {
             orderItems: {
@@ -419,26 +566,92 @@ export class PaystackCheckoutService {
         }),
       ]);
 
-      if (order) {
-        metadata.orderCode = order.orderCode;
-        await this.prisma.order.update({
-          where: { id: order.id },
-          data: {
-            status: paymentData.status === 'success' ? 'confirmed' : 'cancelled',
-            paymentStatus: paymentData.status === 'success' ? 'processing' : 'failed',
-            paymentMethod: paymentData.channel,
-            paymentAmount: paymentData.amount / 100,
-            paidAt: paymentData.status === 'success' ? new Date() : null,
+      let orders = ordersByReference;
+      const metadataOrderIds = Array.isArray(paymentData.metadata?.orderIds)
+        ? paymentData.metadata.orderIds
+        : [];
+
+      if (orders.length === 0 && metadataOrderIds.length > 0) {
+        orders = await this.prisma.order.findMany({
+          where: { id: { in: metadataOrderIds } },
+          include: {
+            orderItems: {
+              include: {
+                product: {
+                  include: {
+                    retailer: true,
+                  },
+                },
+              },
+            },
+            user: {
+              select: {
+                email: true,
+                fullName: true,
+                phone: true,
+              },
+            },
           },
         });
       }
 
+      if (orders.length > 0) {
+        for (const order of orders) {
+          const orderUpdate: any = {
+            status: paymentData.status === 'success' ? 'confirmed' : 'cancelled',
+            // CHANGE: mark payment as paid on successful Paystack verification
+            paymentStatus: paymentData.status === 'success' ? 'paid' : 'failed',
+            paymentMethod: paymentData.channel,
+            // CHANGE: use per-order total when multiple orders are paid in one transaction
+            paymentAmount: orders.length > 1 ? Number(order.totalAmount) : paymentData.amount / 100,
+            paidAt: paymentData.status === 'success' ? new Date() : null,
+            paystackReference: reference,
+          };
+
+          if (!order.orderCode) {
+            const newOrderCode = await this.generateOrderCode();
+            orderUpdate.orderCode = newOrderCode;
+            order.orderCode = newOrderCode;
+          }
+
+          // CHANGE: deduct retailer stock on payment success (idempotent)
+          if (paymentData.status === 'success' && order.paymentStatus !== 'paid') {
+            const stockUpdates = order.orderItems
+              .filter((item) => item.type === 'product' && item.productId)
+              .map((item) =>
+                this.prisma.product.update({
+                  where: { id: item.productId },
+                  data: {
+                    stockQuantity: {
+                      decrement: item.quantity,
+                    },
+                  },
+                })
+              );
+
+            if (stockUpdates.length > 0) {
+              await this.prisma.$transaction(stockUpdates);
+            }
+          }
+
+          await this.prisma.order.update({
+            where: { id: order.id },
+            data: orderUpdate,
+          });
+        }
+      }
+
       if (manufacturerOrder) {
-        metadata.orderCode = manufacturerOrder.orderCode;
         const manufacturerStatusUpdate: any = {
           paymentStatus: paymentData.status === 'success' ? 'paid' : 'failed',
           paidAt: paymentData.status === 'success' ? new Date() : null,
         };
+
+        if (!manufacturerOrder.orderCode) {
+          const newOrderCode = await this.generateManufacturerOrderCode();
+          manufacturerStatusUpdate.orderCode = newOrderCode;
+          manufacturerOrder.orderCode = newOrderCode;
+        }
 
         if (paymentData.status === 'success' && manufacturerOrder.status === 'pending') {
           manufacturerStatusUpdate.status = 'confirmed';
@@ -457,16 +670,17 @@ export class PaystackCheckoutService {
         orderType: manufacturerOrder ? 'manufacturer_order' : (paymentData.metadata?.orderType || 'order'),
       } as any;
 
-      if (order) {
-        metadata.orderCode = order.orderCode;
+      if (orders.length > 0) {
+        const primaryOrder = orders[0];
+        metadata.orderCode = primaryOrder.orderCode;
         metadata.order = {
-          id: order.id,
-          orderCode: order.orderCode,
-          status: order.status,
-          totalAmount: order.totalAmount,
-          currency: order.currency,
-          createdAt: order.createdAt,
-          orderItems: order.orderItems.map((item) => ({
+          id: primaryOrder.id,
+          orderCode: primaryOrder.orderCode,
+          status: primaryOrder.status,
+          totalAmount: primaryOrder.totalAmount,
+          currency: primaryOrder.currency,
+          createdAt: primaryOrder.createdAt,
+          orderItems: primaryOrder.orderItems.map((item) => ({
             id: item.id,
             title: item.title,
             quantity: item.quantity,
@@ -487,6 +701,14 @@ export class PaystackCheckoutService {
               : null,
           })),
         };
+        metadata.orders = orders.map((order) => ({
+          id: order.id,
+          orderCode: order.orderCode,
+          status: order.status,
+          totalAmount: order.totalAmount,
+          currency: order.currency,
+          createdAt: order.createdAt,
+        }));
       } else if (manufacturerOrder) {
         metadata.orderCode = manufacturerOrder.orderCode;
         metadata.order = {
@@ -693,15 +915,24 @@ export class PaystackCheckoutService {
       const commissionData = await this.calculateCommission(order);
       
       // Prepare Paystack payment data
+      let orderCode = order.orderCode;
+      if (!orderCode) {
+        orderCode = await this.generateOrderCode();
+        await this.prisma.order.update({
+          where: { id: order.id },
+          data: { orderCode },
+        });
+      }
+
       const paymentData: any = {
         email: createPaymentDto.customerEmail || order.user?.email || order.customerEmail,
         amount: Math.round(createPaymentDto.amount * 100), // Convert to kobo
         currency: 'KES',
-        reference: `WKS_${Date.now()}_${order.id}`,
-        callback_url: `${this.getBackendUrl()}/api/paystack/checkout/webhook`,
+        reference: orderCode,
+        // CHANGE: remove callback_url to use Paystack dashboard redirect URL
         metadata: {
           orderId: order.id,
-          orderCode: order.orderCode,
+          orderCode: orderCode,
           customerName: createPaymentDto.customerName || order.user?.fullName || order.customerEmail || 'Customer',
           customerPhone: createPaymentDto.customerPhone || order.user?.phone || order.customerPhone || '',
           commissionData: commissionData,
@@ -883,7 +1114,7 @@ export class PaystackCheckoutService {
       console.log(' [CART_PAYMENT] Order ID:', createPaymentDto.orderId);
       console.log(' [CART_PAYMENT] Customer Email:', createPaymentDto.customerEmail);
       console.log(' [CART_PAYMENT] Amount:', createPaymentDto.amount);
-      console.log(' [CART_PAYMENT] Currency:', createPaymentDto.currency);
+      console.log(' [CART_PAYMENT] Currency:', createPaymentDto.currency || `KES`);
 
       this.logger.log(`Initializing cart payment for order: ${createPaymentDto.orderId}`);
 
@@ -931,110 +1162,250 @@ export class PaystackCheckoutService {
         console.log(' [CART_PAYMENT] Created basic cart order:', order.id);
         
         // Use standard payment for basic orders
+        let orderCode = order.orderCode;
+        if (!orderCode) {
+          orderCode = await this.generateOrderCode();
+          await this.prisma.order.update({
+            where: { id: order.id },
+            data: { orderCode },
+          });
+        }
+
         const paymentData = {
           amount: createPaymentDto.amount,
           currency: createPaymentDto.currency || 'KES',
           email: createPaymentDto.customerEmail,
-          reference: createPaymentDto.reference,
-          metadata: createPaymentDto.metadata
+          customerName: createPaymentDto.customerName,
+          customerPhone: createPaymentDto.customerPhone,
+          reference: orderCode,
+          metadata: {
+            ...(createPaymentDto.metadata || {}),
+            orderId: order.id,
+            orderCode: orderCode,
+          }
         };
 
         return await this.paymentsService.processPayment(order.id, paymentData);
       }
 
-      // Process cart items and create proper order
+      // Process cart items and create proper order(s)
       console.log(' [CART_PAYMENT] Processing cart items...');
-      
-      // Create the order
-      const order = await this.prisma.order.create({
-        data: {
-          userId: user.id,
 
-          orderCode: await this.generateOrderCode(),
-          totalAmount: createPaymentDto.amount,
-          currency: createPaymentDto.currency || 'KES',
-          status: 'pending',
-          customerEmail: createPaymentDto.customerEmail,
-          customerPhone: createPaymentDto.customerPhone,
-        },
-        include: {
-          user: {
-            select: {
-              email: true,
-              fullName: true,
-              phone: true,
-            }
+      // CHANGE: resolve retailer/vendor per cart item for multi-retailer split orders
+      const productItems = cartItems.filter(item => item.type === 'product');
+      const serviceItems = cartItems.filter(item => item.type === 'service');
+
+      const productIds = productItems.map(item => item.id);
+      const products = productIds.length > 0
+        ? await this.prisma.product.findMany({
+            where: { id: { in: productIds } },
+            select: { id: true, retailerId: true },
+          })
+        : [];
+      const productRetailerMap = new Map(products.map(p => [p.id, p.retailerId]));
+
+      const missingServiceVendorIds = serviceItems
+        .filter(item => !item.vendorId)
+        .map(item => item.id);
+      const services = missingServiceVendorIds.length > 0
+        ? await this.prisma.service.findMany({
+            where: { id: { in: missingServiceVendorIds } },
+            select: { id: true, vendorId: true },
+          })
+        : [];
+      const serviceVendorMap = new Map(services.map(s => [s.id, s.vendorId]));
+
+      const groups = new Map<string, { retailerId?: string; vendorId?: string; items: any[] }>();
+      for (const item of cartItems) {
+        let ownerKey = 'unassigned';
+        let retailerId: string | null = null;
+        let vendorId: string | null = null;
+
+        if (item.type === 'product') {
+          retailerId = productRetailerMap.get(item.id) || null;
+          if (retailerId) {
+            ownerKey = `retailer:${retailerId}`;
+          }
+        } else {
+          vendorId = item.vendorId || serviceVendorMap.get(item.id) || null;
+          if (vendorId && !item.vendorId) {
+            (item as any).vendorId = vendorId;
+          }
+          if (vendorId) {
+            ownerKey = `vendor:${vendorId}`;
           }
         }
+
+        if (!groups.has(ownerKey)) {
+          groups.set(ownerKey, { retailerId, vendorId, items: [] });
+        }
+        groups.get(ownerKey)!.items.push(item);
+      }
+
+      const groupedEntries = Array.from(groups.entries());
+      console.log(' [CART_PAYMENT] Grouped cart orders:', groupedEntries.length);
+
+      // CHANGE: fallback for multi-retailer/vendor carts -> create separate orders per partner
+      if (groupedEntries.length > 1) {
+        const createdOrders = [];
+        for (const [, group] of groupedEntries) {
+          const order = await this.createCartOrderForGroup({
+            userId: user.id,
+            customerEmail: createPaymentDto.customerEmail,
+            customerPhone: createPaymentDto.customerPhone,
+            currency: createPaymentDto.currency || 'KES',
+            items: group.items,
+            retailerId: group.retailerId,
+            vendorId: group.vendorId,
+          });
+          createdOrders.push(order);
+        }
+
+        const orderIds = createdOrders.map(o => o.id);
+        const orderCodes = createdOrders.map(o => o.orderCode).filter(Boolean) as string[];
+        const totalAmount = createdOrders.reduce((sum, o) => sum + Number(o.totalAmount), 0);
+
+        const partnerIds = groupedEntries
+          .map(([, group]) => group.retailerId || group.vendorId)
+          .filter(Boolean) as string[];
+
+        const partnerProfiles = partnerIds.length > 0
+          ? await this.prisma.profile.findMany({
+              where: { id: { in: partnerIds } },
+              select: { id: true, email: true, fullName: true, businessName: true },
+            })
+          : [];
+        const partnerMap = new Map(partnerProfiles.map(p => [p.id, p]));
+
+        const vendors = groupedEntries
+          .map(([, group]) => {
+            const partnerId = group.retailerId || group.vendorId;
+            if (!partnerId) return null;
+            const profile = partnerMap.get(partnerId);
+            const amount = group.items.reduce((sum, item) => {
+              const lineTotal = item.type === 'product'
+                ? item.price * (item.quantity || 1)
+                : item.price;
+              return sum + lineTotal;
+            }, 0);
+            return {
+              vendorId: partnerId,
+              vendorEmail: profile?.email || createPaymentDto.customerEmail,
+              vendorName: profile?.fullName || profile?.businessName || 'Partner',
+              amount,
+              percentage: 0,
+            };
+          })
+          .filter(Boolean) as Array<{ vendorId: string; vendorEmail: string; vendorName: string; amount: number; percentage: number }>;
+
+        const totalVendorAmount = vendors.reduce((sum, v) => sum + v.amount, 0);
+        vendors.forEach(v => {
+          v.percentage = totalVendorAmount > 0 ? Math.round((v.amount / totalVendorAmount) * 10000) / 100 : 0;
+        });
+
+        const hasUnassignedPartner = groupedEntries.some(([, group]) => !group.retailerId && !group.vendorId);
+
+        const metadata = {
+          ...(createPaymentDto.metadata || {}),
+          orderIds,
+          orderCodes,
+          orderCode: orderCodes[0],
+        };
+
+        let paymentResponse: { success: boolean; reference?: string; authorization_url?: string; access_code?: string; message?: string };
+
+        if (!hasUnassignedPartner && vendors.length > 1) {
+          console.log(' [CART_PAYMENT] Using Payment Groups for multi-order cart payment...');
+          const paymentGroupData = {
+            orderId: orderIds[0],
+            totalAmount,
+            currency: createPaymentDto.currency || 'KES',
+            customerEmail: createPaymentDto.customerEmail,
+            orderIds,
+            orderCodes,
+            reference: orderCodes[0],
+            vendors,
+            platformFee: (totalAmount * 10) / 100,
+            platformFeePercentage: 10,
+          };
+          paymentResponse = await this.paymentsService.initializePaymentGroup(paymentGroupData);
+        } else {
+          console.log(' [CART_PAYMENT] Using standard payment for multi-order cart payment...');
+          paymentResponse = await this.paymentsService.initializePayment({
+            amount: totalAmount,
+            currency: createPaymentDto.currency || 'KES',
+            email: createPaymentDto.customerEmail,
+            reference: orderCodes[0],
+            customerName: createPaymentDto.customerName,
+            customerPhone: createPaymentDto.customerPhone,
+            metadata,
+          });
+        }
+
+        if (!paymentResponse.success || !paymentResponse.reference) {
+          throw new Error(paymentResponse.message || 'Payment initialization failed');
+        }
+
+        await this.prisma.order.updateMany({
+          where: { id: { in: orderIds } },
+          data: {
+            paystackReference: paymentResponse.reference,
+            paymentStatus: 'pending',
+          },
+        });
+
+        return {
+          success: true,
+          data: {
+            reference: paymentResponse.reference,
+            authorization_url: paymentResponse.authorization_url,
+            access_code: paymentResponse.access_code,
+          },
+        };
+      }
+
+      // Single partner order (existing flow)
+      const singleGroup = groupedEntries[0];
+      const singleItems = singleGroup?.[1]?.items || cartItems;
+      const retailerId = singleGroup?.[1]?.retailerId || null;
+      const vendorId = singleGroup?.[1]?.vendorId || null;
+
+      const order = await this.createCartOrderForGroup({
+        userId: user.id,
+        customerEmail: createPaymentDto.customerEmail,
+        customerPhone: createPaymentDto.customerPhone,
+        currency: createPaymentDto.currency || 'KES',
+        items: singleItems,
+        retailerId,
+        vendorId,
       });
 
       console.log(' [CART_PAYMENT] Created cart order:', order.id);
 
-      // Process cart items
-      const productItems = cartItems.filter(item => item.type === 'product');
-      const serviceItems = cartItems.filter(item => item.type === 'service');
-
-      console.log(' [CART_PAYMENT] Cart items breakdown:');
-      console.log(' [CART_PAYMENT]   - Product items:', productItems.length);
-      console.log(' [CART_PAYMENT]   - Service items:', serviceItems.length);
-
-      // Create order items for products
-      if (productItems.length > 0) {
-        const orderItems = productItems.map(item => ({
-          orderId: order.id,
-          productId: item.id,
-          quantity: item.quantity || 1,
-          unitPrice: item.price,
-          totalPrice: item.price * (item.quantity || 1),
-          currency: order.currency,
-          title: item.name,
-          type: 'product',
-        }));
-
-        await this.prisma.orderItem.createMany({
-          data: orderItems,
-        });
-        console.log(' [CART_PAYMENT] Created order items for products');
-      }
-
-      // Create service appointments for services
-      if (serviceItems.length > 0) {
-        const serviceAppointments = serviceItems.map(item => ({
-          orderId: order.id,
-          serviceId: item.id,
-          vendorId: item.vendorId!,
-          staffId: item.staffId,
-          appointmentDate: new Date(item.appointmentDate!),
-          durationMinutes: item.durationMinutes || 60,
-          servicePrice: item.price,
-          currency: order.currency,
-          status: 'PENDING' as const,
-          notes: '',
-        }));
-
-        await this.prisma.serviceAppointment.createMany({
-          data: serviceAppointments,
-        });
-        console.log(' [CART_PAYMENT] Created service appointments');
-      }
-
-      console.log(' [CART_PAYMENT] ORDER DETAILS:');
-      console.log(' [CART_PAYMENT]   - Order ID:', order.id);
-      console.log(' [CART_PAYMENT]   - Customer Email:', order.customerEmail);
-      console.log(' [CART_PAYMENT]   - Total Amount:', order.totalAmount);
-      console.log(' [CART_PAYMENT]   - Currency:', order.currency);
-      console.log(' [CART_PAYMENT]   - Product Items:', productItems.length);
-      console.log(' [CART_PAYMENT]   - Service Appointments:', serviceItems.length);
-
       // Use Payment Groups for cart orders with items
       console.log(' [CART_PAYMENT] Using Payment Groups for cart order with items...');
       
+      let orderCode = order.orderCode;
+      if (!orderCode) {
+        orderCode = await this.generateOrderCode();
+        await this.prisma.order.update({
+          where: { id: order.id },
+          data: { orderCode },
+        });
+      }
+
       const paymentData = {
-        amount: createPaymentDto.amount,
+        amount: Number(order.totalAmount),
         currency: createPaymentDto.currency || 'KES',
         email: createPaymentDto.customerEmail,
-        reference: createPaymentDto.reference,
-        metadata: createPaymentDto.metadata
+        customerName: createPaymentDto.customerName,
+        customerPhone: createPaymentDto.customerPhone,
+        reference: orderCode,
+        metadata: {
+          ...(createPaymentDto.metadata || {}),
+          orderId: order.id,
+          orderCode: orderCode,
+        }
       };
 
       return await this.paymentsService.processPayment(order.id, paymentData);
@@ -1120,15 +1491,26 @@ export class PaystackCheckoutService {
       // Otherwise, convert totalAmount from KES to kobo (multiply by 100)
       const amountInKobo = createPaymentDto.amount || Math.round(Number(manufacturerOrder.totalAmount) * 100);
       
+      let orderCode = manufacturerOrder.orderCode;
+      if (!orderCode) {
+        orderCode = await this.generateManufacturerOrderCode();
+        await this.prisma.manufacturerOrder.update({
+          where: { id: manufacturerOrder.id },
+          data: { orderCode },
+        });
+      }
+
       const paymentData = {
         email: createPaymentDto.customerEmail || manufacturerOrder.retailer.email,
+        customerName: createPaymentDto.customerName,
+        customerPhone: createPaymentDto.customerPhone,
         amount: amountInKobo,
         currency: createPaymentDto.currency || manufacturerOrder.currency || 'KES',
-        reference: createPaymentDto.reference || `MFG-${manufacturerOrder.id}-${Date.now()}`,
+        reference: orderCode,
         metadata: {
           ...createPaymentDto.metadata,
           orderId: manufacturerOrder.id,
-          orderCode: manufacturerOrder.orderCode,
+          orderCode: orderCode,
           orderType: 'manufacturer_order',
           retailerId: manufacturerOrder.retailer.id,
           manufacturerId: manufacturerOrder.manufacturer.id,
@@ -1634,5 +2016,8 @@ export class PaystackCheckoutService {
     }
   }
 }
+
+
+
 
 

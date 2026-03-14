@@ -22,6 +22,11 @@ export interface PaymentGroupData {
   totalAmount: number
   currency: string
   customerEmail: string
+  // CHANGE: allow multi-order cart payments to pass all order IDs
+  orderIds?: string[]
+  orderCodes?: string[]
+  // CHANGE: optional reference override for payment groups
+  reference?: string
   vendors: Array<{
     vendorId: string
     vendorEmail: string
@@ -174,12 +179,15 @@ export class PaymentsService {
         amount: totalVendorAmount * 100, // Convert to kobo - using vendor total only
         currency: paymentGroupData.currency,
         email: paymentGroupData.customerEmail,
-        reference: `group_${paymentGroupData.orderId}_${Date.now()}`,
+        reference: paymentGroupData.reference || `group_${paymentGroupData.orderId}_${Date.now()}`,
         // NOTE: Removed transaction_charge - it was causing Paystack to deduct the fee BEFORE splitting
         // This caused: amount (1754) - transaction_charge (175.4) = 1578.6, but vendors need 1750
         // Platform fee will be collected separately after settlement
         metadata: {
           orderId: paymentGroupData.orderId,
+          // CHANGE: include multi-order metadata when present
+          orderIds: paymentGroupData.orderIds,
+          orderCodes: paymentGroupData.orderCodes,
           vendorCount: paymentGroupData.vendors.length,
           platformFeePercentage: paymentGroupData.platformFeePercentage,
           platformFee: paymentGroupData.platformFee,
@@ -191,7 +199,7 @@ export class PaymentsService {
           })),
         },
         split_code: await this.createSplitCode(paymentGroupData),
-        callback_url: `${this.getBackendUrl()}/api/paystack/checkout/webhook`,
+        // CHANGE: remove callback_url to use Paystack dashboard redirect URL
       }
 
       const response = await axios.post(
@@ -501,7 +509,7 @@ export class PaymentsService {
         currency: paymentData.currency,
         email: paymentData.email,
         reference: reference,
-        callback_url: `${this.getBackendUrl()}/api/paystack/checkout/webhook`,
+        // callback_url: `${this.getBackendUrl()}/api/paystack/checkout/webhook`,
         metadata: {
           ...paymentData.metadata,
           customer_name: paymentData.customerName,
@@ -523,10 +531,10 @@ export class PaymentsService {
         "💳 [INITIALIZE_PAYMENT]   - Reference:",
         paymentRequest.reference
       )
-      console.log(
-        "💳 [INITIALIZE_PAYMENT]   - Callback URL:",
-        paymentRequest.callback_url
-      )
+      // console.log(
+      //   "💳 [INITIALIZE_PAYMENT]   - Callback URL:",
+      //   paymentRequest.callback_url
+      // )
 
       const response = await axios.post(
         `${this.paystackBaseUrl}/transaction/initialize`,
@@ -720,7 +728,7 @@ export class PaymentsService {
         }
       }
 
-      // Count unique vendors
+      // Count unique vendors/retailers
       const vendors = new Set()
       order.orderItems.forEach((item) => {
         if (item.product?.retailer) {
@@ -733,7 +741,7 @@ export class PaymentsService {
         }
       })
 
-      const isMultiVendor = vendors.size > 1
+      const isMultiVendor = vendors.size > 1;
       console.log(
         "💳 [PAYMENT_PROCESS] Order Type:",
         isMultiVendor ? "MULTI-VENDOR" : "SINGLE VENDOR"
